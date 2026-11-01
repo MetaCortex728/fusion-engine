@@ -5,7 +5,8 @@ target_include_directories(doctest SYSTEM INTERFACE
 # Test-only synthetic scene and virtual sensors used as ground truth.
 # Not part of the fusion library or its public API.
 add_library(fusion_test_support STATIC
-    support/scene.cpp)
+    support/scene.cpp
+    support/sensors.cpp)
 target_include_directories(fusion_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(fusion_test_support PRIVATE fusion_options)
 
