@@ -46,4 +46,5 @@ target_link_libraries(fusion PRIVATE $<BUILD_INTERFACE:fusion_options>)
 
 if(FUSION_BUILD_TESTS)
     enable_testing()
+    add_subdirectory(tests)
 endif()
