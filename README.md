@@ -54,6 +54,15 @@ cmake --preset default && cmake --build --preset default && ctest --preset defau
 The `ci-default`, `ci-clang`, and `ci-asan` presets do the same but treat
 warnings as errors.
 
+### Synthetic test scene
+
+`tests/support/` holds a deterministic synthetic scene used as ground truth
+by the tests: axis-aligned boxes on a ground plane, two virtual pinhole
+cameras (RGB and thermal) at different poses, and a virtual spinning LiDAR.
+Any randomness takes an explicit seed. This code is test-only and is not
+part of the library's API. It currently uses a small rigid transform type
+in `tests/support/rigid.hpp` instead of Eigen.
+
 ### Development container
 
 The `Dockerfile` (Ubuntu 22.04) and `compose.yaml` provide the same toolchain:

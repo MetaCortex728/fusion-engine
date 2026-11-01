@@ -1,0 +1,129 @@
+#include "sensors.hpp"
+
+#include <cmath>
+#include <cstddef>
+#include <random>
+
+namespace fusion::testing {
+
+namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+
+double deg(double d) { return d * kPi / 180.0; }
+
+// Standard normal samples from raw 64-bit draws via Box-Muller, so the
+// sequence does not depend on the standard library's distributions.
+class Gaussian {
+public:
+    explicit Gaussian(std::uint64_t seed) : rng_(seed) {}
+
+    double operator()() {
+        if (has_spare_) {
+            has_spare_ = false;
+            return spare_;
+        }
+        // u1 in (0, 1], u2 in [0, 1).
+        const double u1 = (static_cast<double>(rng_() >> 11) + 1.0) * 0x1.0p-53;
+        const double u2 = static_cast<double>(rng_() >> 11) * 0x1.0p-53;
+        const double r = std::sqrt(-2.0 * std::log(u1));
+        spare_ = r * std::sin(2.0 * kPi * u2);
+        has_spare_ = true;
+        return r * std::cos(2.0 * kPi * u2);
+    }
+
+private:
+    std::mt19937_64 rng_;
+    double spare_ = 0.0;
+    bool has_spare_ = false;
+};
+
+}  // namespace
+
+Mat3 R_body_optical() {
+    Mat3 r;
+    r.m[0][0] = 0.0;  r.m[0][1] = 0.0;  r.m[0][2] = 1.0;
+    r.m[1][0] = -1.0; r.m[1][1] = 0.0;  r.m[1][2] = 0.0;
+    r.m[2][0] = 0.0;  r.m[2][1] = -1.0; r.m[2][2] = 0.0;
+    return r;
+}
+
+Vec3 PinholeCamera::pixel_direction_camera(double u, double v) const {
+    return normalized(Vec3{(u - K.cx) / K.fx, (v - K.cy) / K.fy, 1.0});
+}
+
+Ray PinholeCamera::pixel_ray_world(double u, double v) const {
+    return {T_world_camera.t, T_world_camera.rotate(pixel_direction_camera(u, v))};
+}
+
+std::vector<double> PinholeCamera::render_depth(const Scene& scene, double max_distance) const {
+    const std::size_t w = static_cast<std::size_t>(K.width);
+    const std::size_t h = static_cast<std::size_t>(K.height);
+    std::vector<double> depth(w * h, 0.0);
+    for (std::size_t row = 0; row < h; ++row) {
+        for (std::size_t col = 0; col < w; ++col) {
+            const Vec3 d_cam =
+                pixel_direction_camera(static_cast<double>(col), static_cast<double>(row));
+            const Ray ray{T_world_camera.t, T_world_camera.rotate(d_cam)};
+            if (auto hit = scene.raycast(ray.origin, ray.direction, max_distance)) {
+                depth[row * w + col] = hit->distance * d_cam.z;
+            }
+        }
+    }
+    return depth;
+}
+
+PinholeCamera make_rgb_camera() {
+    PinholeCamera cam;
+    cam.K = {500.0, 500.0, 319.5, 239.5, 640, 480};
+    // Body frame at (0, 0.1, 1.2) looking along +x.
+    cam.T_world_camera = {R_body_optical(), {0.0, 0.1, 1.2}};
+    return cam;
+}
+
+PinholeCamera make_thermal_camera() {
+    PinholeCamera cam;
+    cam.K = {320.0, 320.0, 159.5, 127.5, 320, 256};
+    // Body frame at (0, -0.15, 1.25), yawed 3 degrees and pitched 2 degrees
+    // down (positive pitch about +y tilts +x towards -z).
+    const Mat3 R_world_body = rot_rpy(0.0, deg(2.0), deg(3.0));
+    cam.T_world_camera = {R_world_body * R_body_optical(), {0.0, -0.15, 1.25}};
+    return cam;
+}
+
+LidarConfig make_reference_lidar() {
+    LidarConfig c;
+    for (int i = 0; i < 16; ++i) {
+        c.elevations_rad.push_back(deg(-15.0 + 2.0 * i));
+    }
+    c.azimuth_step_rad = deg(0.5);
+    c.min_range = 0.5;
+    c.max_range = 100.0;
+    c.T_world_lidar = {Mat3::identity(), {0.0, 0.0, 1.8}};
+    return c;
+}
+
+std::vector<LidarPoint> scan(const Scene& scene, const LidarConfig& config) {
+    std::vector<LidarPoint> points;
+    const int columns = static_cast<int>(std::lround(2.0 * kPi / config.azimuth_step_rad));
+    Gaussian noise(config.seed);
+    for (int col = 0; col < columns; ++col) {
+        const double az = config.azimuth_step_rad * col;
+        for (std::size_t ring = 0; ring < config.elevations_rad.size(); ++ring) {
+            const double el = config.elevations_rad[ring];
+            const Vec3 d_lidar{std::cos(el) * std::cos(az), std::cos(el) * std::sin(az),
+                               std::sin(el)};
+            const Vec3 d_world = config.T_world_lidar.rotate(d_lidar);
+            // Draw for every beam, hit or not, so one beam's outcome does
+            // not shift the noise applied to the others.
+            const double n = config.range_noise_stddev * noise();
+            auto hit = scene.raycast(config.T_world_lidar.t, d_world, config.max_range);
+            if (!hit || hit->distance < config.min_range) continue;
+            const double range = hit->distance + n;
+            points.push_back({range * d_lidar, range, static_cast<int>(ring), col});
+        }
+    }
+    return points;
+}
+
+}  // namespace fusion::testing
