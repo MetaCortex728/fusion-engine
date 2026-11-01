@@ -15,7 +15,9 @@ target_link_libraries(fusion_test_support
 add_executable(fusion_tests
     main.cpp
     test_version.cpp
-    test_synthetic_scene.cpp)
+    test_synthetic_scene.cpp
+    test_geometry.cpp
+    test_projection_scene.cpp)
 target_link_libraries(fusion_tests PRIVATE
     fusion::fusion fusion_test_support doctest fusion_options)
 
