@@ -18,11 +18,13 @@ add_executable(fusion_tests
     test_synthetic_scene.cpp
     test_geometry.cpp
     test_projection_scene.cpp
-    test_depth_map.cpp)
+    test_depth_map.cpp
+    test_config.cpp)
 target_link_libraries(fusion_tests PRIVATE
     fusion::fusion fusion_test_support doctest fusion_options)
 
 target_compile_definitions(fusion_tests PRIVATE
-    FUSION_EXPECTED_VERSION="${PROJECT_VERSION}")
+    FUSION_EXPECTED_VERSION="${PROJECT_VERSION}"
+    FUSION_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 add_test(NAME fusion_tests COMMAND fusion_tests)
