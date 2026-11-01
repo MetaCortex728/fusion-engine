@@ -48,6 +48,7 @@ endif()
 
 # Core library: no GUI or dataset dependencies.
 add_library(fusion STATIC
+    src/config.cpp
     src/depth_map.cpp
     src/geometry.cpp
     src/version.cpp)
@@ -58,7 +59,7 @@ target_compile_definitions(fusion PRIVATE
     FUSION_VERSION_STRING="${PROJECT_VERSION}")
 target_link_libraries(fusion
     PUBLIC Eigen3::Eigen
-    PRIVATE $<BUILD_INTERFACE:fusion_options>)
+    PRIVATE ${FUSION_YAML_TARGET} $<BUILD_INTERFACE:fusion_options>)
 
 if(FUSION_BUILD_TESTS)
     enable_testing()
