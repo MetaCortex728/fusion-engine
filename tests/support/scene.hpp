@@ -6,9 +6,11 @@
 #include <optional>
 #include <vector>
 
-#include "rigid.hpp"
+#include <Eigen/Core>
 
 namespace fusion::testing {
+
+using Vec3 = Eigen::Vector3d;
 
 // Axis-aligned box in the world frame, given by its min and max corners.
 struct Box {

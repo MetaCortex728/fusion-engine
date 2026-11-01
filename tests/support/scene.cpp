@@ -9,15 +9,9 @@ namespace fusion::testing {
 
 namespace {
 
-double component(const Vec3& v, int axis) {
-    return axis == 0 ? v.x : (axis == 1 ? v.y : v.z);
-}
-
 Vec3 axis_normal(int axis, double sign) {
-    Vec3 n;
-    if (axis == 0) n.x = sign;
-    if (axis == 1) n.y = sign;
-    if (axis == 2) n.z = sign;
+    Vec3 n = Vec3::Zero();
+    n[axis] = sign;
     return n;
 }
 
@@ -40,10 +34,10 @@ std::optional<Hit> raycast_box(const Box& box, const Vec3& origin, const Vec3& d
     double near_sign = 0.0, far_sign = 0.0;
 
     for (int axis = 0; axis < 3; ++axis) {
-        const double o = component(origin, axis);
-        const double d = component(direction, axis);
-        const double lo = component(box.min, axis);
-        const double hi = component(box.max, axis);
+        const double o = origin[axis];
+        const double d = direction[axis];
+        const double lo = box.min[axis];
+        const double hi = box.max[axis];
         if (d == 0.0) {
             if (o < lo || o > hi) return std::nullopt;
             continue;
@@ -61,7 +55,7 @@ std::optional<Hit> raycast_box(const Box& box, const Vec3& origin, const Vec3& d
     }
 
     double t = 0.0;
-    Vec3 normal;
+    Vec3 normal = Vec3::Zero();
     if (t_near > kMinHitDistance) {
         t = t_near;
         normal = axis_normal(near_axis, near_sign);
@@ -79,12 +73,12 @@ std::optional<Hit> raycast_box(const Box& box, const Vec3& origin, const Vec3& d
 std::optional<Hit> Scene::raycast(const Vec3& origin, const Vec3& direction,
                                   double max_distance) const {
     std::optional<Hit> best;
-    if (direction.z != 0.0) {
-        const double t = (ground_z_ - origin.z) / direction.z;
+    if (direction.z() != 0.0) {
+        const double t = (ground_z_ - origin.z()) / direction.z();
         if (t > kMinHitDistance && t <= max_distance) {
             Vec3 point = origin + t * direction;
-            point.z = ground_z_;  // exact on the plane
-            const double side = origin.z >= ground_z_ ? 1.0 : -1.0;
+            point.z() = ground_z_;  // exact on the plane
+            const double side = origin.z() >= ground_z_ ? 1.0 : -1.0;
             best = Hit{t, point, Vec3{0.0, 0.0, side}};
         }
     }
@@ -98,17 +92,15 @@ std::optional<Hit> Scene::raycast(const Vec3& origin, const Vec3& direction,
 }
 
 bool Scene::on_surface(const Vec3& p, double tol) const {
-    if (std::abs(p.z - ground_z_) <= tol) return true;
+    if (std::abs(p.z() - ground_z_) <= tol) return true;
     for (const Box& b : boxes_) {
         const bool inside_expanded =
-            p.x >= b.min.x - tol && p.x <= b.max.x + tol &&
-            p.y >= b.min.y - tol && p.y <= b.max.y + tol &&
-            p.z >= b.min.z - tol && p.z <= b.max.z + tol;
+            (p.array() >= b.min.array() - tol).all() && (p.array() <= b.max.array() + tol).all();
         if (!inside_expanded) continue;
         for (int axis = 0; axis < 3; ++axis) {
-            const double v = component(p, axis);
-            if (std::abs(v - component(b.min, axis)) <= tol ||
-                std::abs(v - component(b.max, axis)) <= tol) {
+            const double v = p[axis];
+            if (std::abs(v - b.min[axis]) <= tol ||
+                std::abs(v - b.max[axis]) <= tol) {
                 return true;
             }
         }

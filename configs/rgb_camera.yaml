@@ -1,0 +1,19 @@
+# Example sensor config: the synthetic RGB camera used in the tests, relative
+# to the reference LiDAR of the synthetic scene. Not calibrated hardware.
+name: rgb
+resolution: [640, 480]          # width, height in pixels
+intrinsics:
+  # [[fx, s, cx], [0, fy, cy], [0, 0, 1]]; pixel centres at integer coordinates
+  K: [[500.0, 0.0, 319.5],
+      [0.0, 500.0, 239.5],
+      [0.0, 0.0, 1.0]]
+distortion: [0.0, 0.0, 0.0, 0.0, 0.0]   # k1, k2, p1, p2, k3
+extrinsics:
+  # T_rgb_lidar: maps points from the lidar frame (x forward, y left, z up)
+  # into the camera optical frame (x right, y down, z forward).
+  source: lidar
+  rotation: [[0.0, -1.0, 0.0],
+             [0.0, 0.0, -1.0],
+             [1.0, 0.0, 0.0]]
+  translation: [0.1, -0.6, 0.0]  # metres
+time_offset_ns: 0                # t_reference = t_sensor + time_offset_ns

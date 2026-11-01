@@ -1,9 +1,9 @@
 # fusion-engine
 
-> **Status: early-stage.** This repository holds the build system, a
-> development container, and a placeholder library that only reports its
-> version. There is no release yet. Nothing described as a goal below is
-> implemented today.
+> **Status: early-stage.** The library can load a per-sensor YAML config,
+> project LiDAR points into a distorted pinhole camera, and build a sparse
+> depth map. Time alignment, thermal handling, aligned frames, and dataset
+> adapters do not exist yet. There is no release.
 
 ## What it does
 
@@ -20,13 +20,15 @@ multi-sensor alignment without pulling in ROS or a large dependency tree.
 
 - C++17
 - [Eigen](https://eigen.tuxfamily.org/) for linear algebra
-- A YAML parser for configuration (not yet chosen)
+- [yaml-cpp](https://github.com/jbeder/yaml-cpp) for configuration files
 
 No ROS dependency.
 
 ## Design rules
 
-- Dependencies stay minimal: Eigen and a YAML parser.
+- Dependencies stay minimal: Eigen and yaml-cpp, both found on the system
+  and never vendored. Eigen types appear in the public headers; yaml-cpp is
+  used only inside the config loader.
 - No x86-only intrinsics, so the code stays portable to embedded targets.
 - Time is represented as integer nanoseconds.
 - Transforms are named `T_target_source`: the transform that maps a point
@@ -34,8 +36,40 @@ No ROS dependency.
 
 ## How to run
 
-The library currently provides only `fusion::version()`. You need CMake 3.21
-or newer, Ninja, and GCC or Clang with C++17 support.
+You need CMake 3.21 or newer, Ninja, GCC or Clang with C++17 support,
+Eigen 3.4, and yaml-cpp. On Ubuntu:
+
+```sh
+sudo apt-get install cmake ninja-build g++ clang libeigen3-dev libyaml-cpp-dev
+```
+
+### What exists
+
+| Header                   | Provides |
+|--------------------------|----------|
+| `fusion/config.hpp`      | `load_sensor_config()` / `parse_sensor_config()` read a per-sensor YAML file into `SensorConfig`: name, resolution, intrinsics `K`, distortion `[k1, k2, p1, p2, k3]`, extrinsics `T_<sensor>_<source>`, and `time_offset_ns`. Problems throw `ConfigError` naming the file and field, e.g. a missing field, a wrong shape, or a rotation that is not invertible or not orthonormal. |
+| `fusion/geometry.hpp`    | `CameraModel`: pinhole with radial-tangential distortion, `distort()` / `undistort()`, and `project()`. `project_point(camera, T_camera_lidar, p_lidar)` returns the sub-pixel position, pixel index, and z-depth. Only points with z > 0 that land inside the image are kept. Points beyond the radius where radial distortion stops being monotonic are also rejected, so they cannot fold back into the image. |
+| `fusion/depth_map.hpp`   | `SparseDepthMap` over the camera's pixel grid, keeping the nearest depth per pixel, and `project_to_depth_map()` to fill one from a point cloud. |
+
+Conventions: pixel centres sit at integer coordinates, so the image spans
+`[-0.5, width - 0.5) x [-0.5, height - 0.5)`. Depth is the z coordinate in
+the camera's optical frame (x right, y down, z forward).
+
+[`configs/rgb_camera.yaml`](configs/rgb_camera.yaml) is an annotated example
+config. It describes the synthetic RGB camera from the test scene, not real
+hardware.
+
+```cpp
+#include <fusion/config.hpp>
+#include <fusion/depth_map.hpp>
+
+const fusion::SensorConfig cfg = fusion::load_sensor_config("configs/rgb_camera.yaml");
+const fusion::CameraModel camera = fusion::make_camera_model(cfg);
+// cfg.source_frame == "lidar", so cfg.T_sensor_source is T_camera_lidar.
+const fusion::SparseDepthMap depth =
+    fusion::project_to_depth_map(camera, cfg.T_sensor_source, points_lidar);
+for (const auto& e : depth.entries()) { /* e.col, e.row, e.depth */ }
+```
 
 ### Build and test
 
@@ -54,14 +88,21 @@ cmake --preset default && cmake --build --preset default && ctest --preset defau
 The `ci-default`, `ci-clang`, and `ci-asan` presets do the same but treat
 warnings as errors.
 
+In some environments, binaries built with Clang 14 ASan sometimes segfault at
+startup, before any test runs. This was seen on WSL2 with a 6.18 kernel, where
+an empty ASan program crashes the same way. If `asan` or `ci-asan` fails with
+`SEGFAULT` and prints no doctest output, rerun it.
+
 ### Synthetic test scene
 
 `tests/support/` holds a deterministic synthetic scene used as ground truth
 by the tests: axis-aligned boxes on a ground plane, two virtual pinhole
 cameras (RGB and thermal) at different poses, and a virtual spinning LiDAR.
 Any randomness takes an explicit seed. This code is test-only and is not
-part of the library's API. It currently uses a small rigid transform type
-in `tests/support/rigid.hpp` instead of Eigen.
+part of the library's API. It uses Eigen types (`Eigen::Vector3d`,
+`Eigen::Isometry3d`) for points and transforms. The tests project scene
+points from the virtual LiDAR into the virtual cameras and compare the result
+against ray-cast depth.
 
 ### Development container
 
