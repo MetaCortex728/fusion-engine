@@ -6,10 +6,23 @@
 #include <optional>
 #include <vector>
 
-#include "rigid.hpp"
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
 #include "scene.hpp"
 
 namespace fusion::testing {
+
+using Mat3 = Eigen::Matrix3d;
+// Rigid transform. A variable named T_target_source maps a point expressed in
+// the `source` frame into the `target` frame: p_target = T_target_source * p_source.
+using Rigid3 = Eigen::Isometry3d;
+
+// Rotation from roll (about x), pitch (about y), yaw (about z): R = Rz * Ry * Rx.
+Mat3 rot_rpy(double roll, double pitch, double yaw);
+
+// Rigid transform with rotation R and translation t.
+Rigid3 make_rigid(const Mat3& R, const Vec3& t);
 
 // Rotation that maps directions in a camera optical frame (x right, y down,
 // z forward) into a body frame (x forward, y left, z up): R_body_optical.
@@ -33,7 +46,7 @@ struct Ray {
 // frame: x right, y down, z along the optical axis.
 struct PinholeCamera {
     PinholeIntrinsics K;
-    Rigid3 T_world_camera;
+    Rigid3 T_world_camera = Rigid3::Identity();
 
     // Unit ray through pixel coordinates (u, v), in the camera frame.
     // Pixel centres sit at integer coordinates.
@@ -71,7 +84,7 @@ struct LidarConfig {
     double range_noise_stddev = 0.0;
     // Seed for the range noise generator. Same seed, same scan.
     std::uint64_t seed = 0;
-    Rigid3 T_world_lidar;
+    Rigid3 T_world_lidar = Rigid3::Identity();
 };
 
 // 16 beams from -15 to +15 degrees, 0.5 degree azimuth step, mounted 1.8 m

@@ -8,7 +8,9 @@ add_library(fusion_test_support STATIC
     support/scene.cpp
     support/sensors.cpp)
 target_include_directories(fusion_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(fusion_test_support PRIVATE fusion_options)
+target_link_libraries(fusion_test_support
+    PUBLIC Eigen3::Eigen
+    PRIVATE fusion_options)
 
 add_executable(fusion_tests
     main.cpp

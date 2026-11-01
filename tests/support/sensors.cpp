@@ -40,20 +40,33 @@ private:
 
 }  // namespace
 
+Mat3 rot_rpy(double roll, double pitch, double yaw) {
+    return (Eigen::AngleAxisd(yaw, Vec3::UnitZ()) * Eigen::AngleAxisd(pitch, Vec3::UnitY()) *
+            Eigen::AngleAxisd(roll, Vec3::UnitX()))
+        .toRotationMatrix();
+}
+
+Rigid3 make_rigid(const Mat3& R, const Vec3& t) {
+    Rigid3 T = Rigid3::Identity();
+    T.linear() = R;
+    T.translation() = t;
+    return T;
+}
+
 Mat3 R_body_optical() {
     Mat3 r;
-    r.m[0][0] = 0.0;  r.m[0][1] = 0.0;  r.m[0][2] = 1.0;
-    r.m[1][0] = -1.0; r.m[1][1] = 0.0;  r.m[1][2] = 0.0;
-    r.m[2][0] = 0.0;  r.m[2][1] = -1.0; r.m[2][2] = 0.0;
+    r << 0.0, 0.0, 1.0,
+        -1.0, 0.0, 0.0,
+         0.0, -1.0, 0.0;
     return r;
 }
 
 Vec3 PinholeCamera::pixel_direction_camera(double u, double v) const {
-    return normalized(Vec3{(u - K.cx) / K.fx, (v - K.cy) / K.fy, 1.0});
+    return Vec3{(u - K.cx) / K.fx, (v - K.cy) / K.fy, 1.0}.normalized();
 }
 
 Ray PinholeCamera::pixel_ray_world(double u, double v) const {
-    return {T_world_camera.t, T_world_camera.rotate(pixel_direction_camera(u, v))};
+    return {T_world_camera.translation(), T_world_camera.linear() * pixel_direction_camera(u, v)};
 }
 
 std::vector<double> PinholeCamera::render_depth(const Scene& scene, double max_distance) const {
@@ -64,9 +77,9 @@ std::vector<double> PinholeCamera::render_depth(const Scene& scene, double max_d
         for (std::size_t col = 0; col < w; ++col) {
             const Vec3 d_cam =
                 pixel_direction_camera(static_cast<double>(col), static_cast<double>(row));
-            const Ray ray{T_world_camera.t, T_world_camera.rotate(d_cam)};
+            const Ray ray{T_world_camera.translation(), T_world_camera.linear() * d_cam};
             if (auto hit = scene.raycast(ray.origin, ray.direction, max_distance)) {
-                depth[row * w + col] = hit->distance * d_cam.z;
+                depth[row * w + col] = hit->distance * d_cam.z();
             }
         }
     }
@@ -77,7 +90,7 @@ PinholeCamera make_rgb_camera() {
     PinholeCamera cam;
     cam.K = {500.0, 500.0, 319.5, 239.5, 640, 480};
     // Body frame at (0, 0.1, 1.2) looking along +x.
-    cam.T_world_camera = {R_body_optical(), {0.0, 0.1, 1.2}};
+    cam.T_world_camera = make_rigid(R_body_optical(), {0.0, 0.1, 1.2});
     return cam;
 }
 
@@ -87,7 +100,7 @@ PinholeCamera make_thermal_camera() {
     // Body frame at (0, -0.15, 1.25), yawed 3 degrees and pitched 2 degrees
     // down (positive pitch about +y tilts +x towards -z).
     const Mat3 R_world_body = rot_rpy(0.0, deg(2.0), deg(3.0));
-    cam.T_world_camera = {R_world_body * R_body_optical(), {0.0, -0.15, 1.25}};
+    cam.T_world_camera = make_rigid(R_world_body * R_body_optical(), {0.0, -0.15, 1.25});
     return cam;
 }
 
@@ -99,7 +112,7 @@ LidarConfig make_reference_lidar() {
     c.azimuth_step_rad = deg(0.5);
     c.min_range = 0.5;
     c.max_range = 100.0;
-    c.T_world_lidar = {Mat3::identity(), {0.0, 0.0, 1.8}};
+    c.T_world_lidar = make_rigid(Mat3::Identity(), {0.0, 0.0, 1.8});
     return c;
 }
 
@@ -113,11 +126,11 @@ std::vector<LidarPoint> scan(const Scene& scene, const LidarConfig& config) {
             const double el = config.elevations_rad[ring];
             const Vec3 d_lidar{std::cos(el) * std::cos(az), std::cos(el) * std::sin(az),
                                std::sin(el)};
-            const Vec3 d_world = config.T_world_lidar.rotate(d_lidar);
+            const Vec3 d_world = config.T_world_lidar.linear() * d_lidar;
             // Draw for every beam, hit or not, so one beam's outcome does
             // not shift the noise applied to the others.
             const double n = config.range_noise_stddev * noise();
-            auto hit = scene.raycast(config.T_world_lidar.t, d_world, config.max_range);
+            auto hit = scene.raycast(config.T_world_lidar.translation(), d_world, config.max_range);
             if (!hit || hit->distance < config.min_range) continue;
             const double range = hit->distance + n;
             points.push_back({range * d_lidar, range, static_cast<int>(ring), col});

@@ -60,8 +60,8 @@ warnings as errors.
 by the tests: axis-aligned boxes on a ground plane, two virtual pinhole
 cameras (RGB and thermal) at different poses, and a virtual spinning LiDAR.
 Any randomness takes an explicit seed. This code is test-only and is not
-part of the library's API. It currently uses a small rigid transform type
-in `tests/support/rigid.hpp` instead of Eigen.
+part of the library's API. It uses Eigen types (`Eigen::Vector3d`,
+`Eigen::Isometry3d`) for points and transforms.
 
 ### Development container
 
