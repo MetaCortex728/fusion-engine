@@ -48,6 +48,7 @@ endif()
 
 # Core library: no GUI or dataset dependencies.
 add_library(fusion STATIC
+    src/depth_map.cpp
     src/geometry.cpp
     src/version.cpp)
 add_library(fusion::fusion ALIAS fusion)
