@@ -14,6 +14,8 @@ RUN apt-get update \
         gcc \
         g++ \
         git \
+        libeigen3-dev \
+        libyaml-cpp-dev \
         ninja-build \
         python3 \
     && rm -rf /var/lib/apt/lists/*

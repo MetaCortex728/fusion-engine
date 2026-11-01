@@ -34,6 +34,18 @@ else()
     endif()
 endif()
 
+# Third-party dependencies, found on the system and never vendored.
+# Eigen is part of the public API (headers use Eigen types). yaml-cpp is an
+# implementation detail of the config loader.
+find_package(Eigen3 3.4 REQUIRED NO_MODULE)
+find_package(yaml-cpp REQUIRED)
+# yaml-cpp 0.8 exports yaml-cpp::yaml-cpp; 0.7 (Ubuntu 22.04) exports yaml-cpp.
+if(TARGET yaml-cpp::yaml-cpp)
+    set(FUSION_YAML_TARGET yaml-cpp::yaml-cpp)
+else()
+    set(FUSION_YAML_TARGET yaml-cpp)
+endif()
+
 # Core library: no GUI or dataset dependencies.
 add_library(fusion STATIC
     src/version.cpp)
@@ -42,7 +54,9 @@ target_include_directories(fusion PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 target_compile_definitions(fusion PRIVATE
     FUSION_VERSION_STRING="${PROJECT_VERSION}")
-target_link_libraries(fusion PRIVATE $<BUILD_INTERFACE:fusion_options>)
+target_link_libraries(fusion
+    PUBLIC Eigen3::Eigen
+    PRIVATE $<BUILD_INTERFACE:fusion_options>)
 
 if(FUSION_BUILD_TESTS)
     enable_testing()

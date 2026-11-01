@@ -25,7 +25,8 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ clang
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ clang \
+            libeigen3-dev libyaml-cpp-dev
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
       - name: Build
@@ -42,7 +43,8 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ \
+            libeigen3-dev libyaml-cpp-dev
       - name: Configure
         run: cmake --preset ci-default
       - name: Build
