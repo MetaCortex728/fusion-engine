@@ -1,0 +1,87 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FUSION_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "ci",
+      "hidden": true,
+      "cacheVariables": { "FUSION_WARNINGS_AS_ERRORS": "ON" }
+    },
+    {
+      "name": "default",
+      "displayName": "GCC",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "clang",
+      "displayName": "Clang",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Clang with ASan and UBSan",
+      "inherits": "clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FUSION_SANITIZE": "ON"
+      }
+    },
+    { "name": "ci-default", "displayName": "CI: GCC", "inherits": ["ci", "default"] },
+    { "name": "ci-clang", "displayName": "CI: Clang", "inherits": ["ci", "clang"] },
+    { "name": "ci-asan", "displayName": "CI: ASan and UBSan", "inherits": ["ci", "asan"] }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default" },
+    { "name": "clang", "configurePreset": "clang" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "ci-default", "configurePreset": "ci-default" },
+    { "name": "ci-clang", "configurePreset": "ci-clang" },
+    { "name": "ci-asan", "configurePreset": "ci-asan" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "default",
+      "inherits": "base",
+      "configurePreset": "default"
+    },
+    {
+      "name": "clang",
+      "inherits": "base",
+      "configurePreset": "clang"
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    { "name": "ci-default", "inherits": "default", "configurePreset": "ci-default" },
+    { "name": "ci-clang", "inherits": "clang", "configurePreset": "ci-clang" },
+    { "name": "ci-asan", "inherits": "asan", "configurePreset": "ci-asan" }
+  ]
+}
