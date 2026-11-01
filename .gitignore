@@ -1,0 +1,23 @@
+# Build outputs
+build/
+out/
+
+# Local data (datasets are never committed)
+data/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Tooling
+compile_commands.json
+.cache/
+
+# Editors and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
