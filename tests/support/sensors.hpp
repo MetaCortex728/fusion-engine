@@ -58,6 +58,15 @@ struct PinholeCamera {
     // Z-depth image (row-major, width * height) of the scene seen from this
     // camera. Pixels with no hit within max_distance hold 0.
     std::vector<double> render_depth(const Scene& scene, double max_distance) const;
+
+    // Surface id image (row-major) seen through each pixel centre. Pixels
+    // with no hit within max_distance hold kNoSurface.
+    std::vector<int> render_surfaces(const Scene& scene, double max_distance) const;
+
+    // Synthetic thermal image (row-major): the raw value of the surface seen
+    // through each pixel centre, or `background` where nothing is hit.
+    std::vector<std::uint16_t> render_raw(const Scene& scene, double max_distance,
+                                          std::uint16_t background) const;
 };
 
 // Ground-truth RGB and thermal cameras at different poses, both looking at
@@ -70,6 +79,7 @@ struct LidarPoint {
     double range = 0;  // measured range, metres
     int ring = 0;      // index into LidarConfig::elevations_rad
     int column = 0;    // azimuth step index
+    int surface = kNoSurface;  // scene surface the beam hit
 };
 
 // Spinning LiDAR. The LiDAR frame has x forward, y left, z up; azimuth is

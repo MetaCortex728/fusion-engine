@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <random>
+#include <stdexcept>
 
 namespace fusion::testing {
 
@@ -67,7 +68,7 @@ std::optional<Hit> raycast_box(const Box& box, const Vec3& origin, const Vec3& d
         return std::nullopt;
     }
     if (t > max_distance) return std::nullopt;
-    return Hit{t, origin + t * direction, normal};
+    return Hit{t, origin + t * direction, normal, kNoSurface};
 }
 
 std::optional<Hit> Scene::raycast(const Vec3& origin, const Vec3& direction,
@@ -79,16 +80,28 @@ std::optional<Hit> Scene::raycast(const Vec3& origin, const Vec3& direction,
             Vec3 point = origin + t * direction;
             point.z() = ground_z_;  // exact on the plane
             const double side = origin.z() >= ground_z_ ? 1.0 : -1.0;
-            best = Hit{t, point, Vec3{0.0, 0.0, side}};
+            best = Hit{t, point, Vec3{0.0, 0.0, side}, kGroundSurface};
         }
     }
-    for (const Box& box : boxes_) {
+    for (std::size_t i = 0; i < boxes_.size(); ++i) {
         const double limit = best ? best->distance : max_distance;
-        if (auto hit = raycast_box(box, origin, direction, limit)) {
-            if (!best || hit->distance < best->distance) best = hit;
+        if (auto hit = raycast_box(boxes_[i], origin, direction, limit)) {
+            if (!best || hit->distance < best->distance) {
+                best = hit;
+                best->surface = kFirstBoxSurface + static_cast<int>(i);
+            }
         }
     }
     return best;
+}
+
+std::uint16_t Scene::raw_of(int surface) const {
+    if (surface == kGroundSurface) return ground_raw_;
+    const int box = surface - kFirstBoxSurface;
+    if (box < 0 || box >= static_cast<int>(box_raw_.size())) {
+        throw std::out_of_range("Scene::raw_of: unknown surface");
+    }
+    return box_raw_[static_cast<std::size_t>(box)];
 }
 
 bool Scene::on_surface(const Vec3& p, double tol) const {
@@ -109,11 +122,11 @@ bool Scene::on_surface(const Vec3& p, double tol) const {
 }
 
 Scene Scene::reference() {
-    Scene s(0.0);
-    s.add_box({{4.0, -1.0, 0.0}, {6.0, 1.0, 2.0}});     // ahead on +x
-    s.add_box({{-2.0, 5.0, 0.0}, {2.0, 6.0, 3.0}});     // wall on +y
-    s.add_box({{-7.0, -3.0, 0.0}, {-5.0, 3.0, 1.5}});   // low block on -x
-    s.add_box({{1.0, -6.0, 0.5}, {3.0, -4.0, 2.5}});    // floating block on -y
+    Scene s(0.0, 14000);
+    s.add_box({{4.0, -1.0, 0.0}, {6.0, 1.0, 2.0}}, 21000);     // ahead on +x
+    s.add_box({{-2.0, 5.0, 0.0}, {2.0, 6.0, 3.0}}, 65535);     // wall on +y
+    s.add_box({{-7.0, -3.0, 0.0}, {-5.0, 3.0, 1.5}}, 0);       // low block on -x
+    s.add_box({{1.0, -6.0, 0.5}, {3.0, -4.0, 2.5}}, 30000);    // floating block on -y
     return s;
 }
 
@@ -126,7 +139,8 @@ Scene Scene::random(std::uint64_t seed, int box_count) {
         const double hx = uniform(rng, 0.25, 2.0);
         const double hy = uniform(rng, 0.25, 2.0);
         const double h = uniform(rng, 0.5, 4.0);
-        s.add_box({{cx - hx, cy - hy, 0.0}, {cx + hx, cy + hy, h}});
+        s.add_box({{cx - hx, cy - hy, 0.0}, {cx + hx, cy + hy, h}},
+                  static_cast<std::uint16_t>((15000 + 1000 * i) & 0xFFFF));
     }
     return s;
 }
