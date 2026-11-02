@@ -166,4 +166,50 @@ std::vector<LidarPoint> scan(const Scene& scene, const LidarConfig& config) {
     return points;
 }
 
+Vec3 MovingBody::position(std::int64_t t_ns) const {
+    const double dt = static_cast<double>(t_ns - t0_ns) * 1e-9;
+    return position0 + dt * velocity;
+}
+
+double MovingBody::yaw(std::int64_t t_ns) const {
+    const double dt = static_cast<double>(t_ns - t0_ns) * 1e-9;
+    return yaw0 + dt * yaw_rate;
+}
+
+Rigid3 MovingBody::T_world_body(std::int64_t t_ns) const {
+    return make_rigid(rot_rpy(0.0, 0.0, yaw(t_ns)), position(t_ns));
+}
+
+Rigid3 MovingRig::T_camera_lidar() const { return T_body_camera.inverse() * T_body_lidar; }
+
+LidarConfig MovingRig::lidar_at(std::int64_t t_ns) const {
+    LidarConfig c = lidar;
+    c.T_world_lidar = body.T_world_body(t_ns) * T_body_lidar;
+    return c;
+}
+
+PinholeCamera MovingRig::camera_at(std::int64_t t_ns) const {
+    PinholeCamera cam;
+    cam.K = camera_K;
+    cam.T_world_camera = body.T_world_body(t_ns) * T_body_camera;
+    return cam;
+}
+
+MovingRig make_moving_rig() {
+    MovingRig rig;
+    rig.body.t0_ns = 2'000'000'000;
+    rig.body.position0 = {-1.0, 0.0, 0.0};
+    rig.body.yaw0 = 0.02;
+    rig.body.velocity = {std::sqrt(64.0 - 0.09), 0.3, 0.0};  // 8 m/s
+    rig.body.yaw_rate = 0.6;
+    rig.T_body_lidar = make_rigid(rot_rpy(0.01, -0.02, 0.03), {0.0, 0.0, 1.8});
+    rig.T_body_camera = make_rigid(R_body_optical(), {0.2, 0.1, 1.2});
+    rig.lidar = make_reference_lidar();
+    rig.lidar.T_world_lidar = Rigid3::Identity();
+    rig.camera_K = make_rgb_camera().K;
+    rig.t_lidar_ns = rig.body.t0_ns + 107'000'000;
+    rig.t_camera_ns = rig.t_lidar_ns + 33'000'000;
+    return rig;
+}
+
 }  // namespace fusion::testing
