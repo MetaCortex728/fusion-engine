@@ -51,6 +51,7 @@ add_library(fusion STATIC
     src/config.cpp
     src/depth_map.cpp
     src/geometry.cpp
+    src/pose.cpp
     src/thermal.cpp
     src/time.cpp
     src/version.cpp)

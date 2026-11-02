@@ -22,7 +22,8 @@ add_executable(fusion_tests
     test_config.cpp
     test_thermal.cpp
     test_thermal_projection.cpp
-    test_time.cpp)
+    test_time.cpp
+    test_pose.cpp)
 target_link_libraries(fusion_tests PRIVATE
     fusion::fusion fusion_test_support doctest fusion_options)
 
