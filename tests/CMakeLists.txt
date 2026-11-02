@@ -21,12 +21,14 @@ add_executable(fusion_tests
     test_depth_map.cpp
     test_config.cpp
     test_thermal.cpp
-    test_thermal_projection.cpp)
+    test_thermal_projection.cpp
+    test_time.cpp)
 target_link_libraries(fusion_tests PRIVATE
     fusion::fusion fusion_test_support doctest fusion_options)
 
 target_compile_definitions(fusion_tests PRIVATE
     FUSION_EXPECTED_VERSION="${PROJECT_VERSION}"
-    FUSION_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    FUSION_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    FUSION_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 
 add_test(NAME fusion_tests COMMAND fusion_tests)
