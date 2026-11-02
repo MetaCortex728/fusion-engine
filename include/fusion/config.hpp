@@ -13,6 +13,15 @@
 //     translation: [x, y, z]        # metres
 //   time_offset_ns: 0               # integer nanoseconds
 //
+// Thermal cameras add an optional section (all four constants required):
+//
+//   thermal:
+//     planck: {R: 380747, B: 1428, F: 1, O: -88.539}
+//
+// with the Planck constants of PlanckParams (finite, R > 0, B > 0). A config
+// without a `thermal` section, such as an RGB camera's, leaves
+// SensorConfig::thermal empty.
+//
 // The extrinsics map a point from the `source` frame into this sensor's
 // frame: p_sensor = R * p_source + t. For a camera with source `lidar` this
 // is T_camera_lidar. The time offset is added to this sensor's timestamps to
@@ -20,6 +29,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -27,8 +37,14 @@
 #include <Eigen/Geometry>
 
 #include "fusion/geometry.hpp"
+#include "fusion/thermal.hpp"
 
 namespace fusion {
+
+/// Calibration specific to thermal cameras.
+struct ThermalCalibration {
+    PlanckParams planck;
+};
 
 struct SensorConfig {
     std::string name;
@@ -40,6 +56,8 @@ struct SensorConfig {
     /// T_sensor_source: maps points from `source_frame` into this sensor's frame.
     Eigen::Isometry3d T_sensor_source = Eigen::Isometry3d::Identity();
     std::int64_t time_offset_ns = 0;
+    /// Present only for thermal cameras.
+    std::optional<ThermalCalibration> thermal;
 };
 
 /// Thrown for an unreadable file, invalid YAML, a missing field, a value of

@@ -91,8 +91,55 @@ TEST_CASE("example config matches the synthetic RGB camera and reference LiDAR")
     CHECK(cfg.distortion.is_zero());
     CHECK(cfg.source_frame == "lidar");
     CHECK(cfg.time_offset_ns == 0);
+    CHECK_FALSE(cfg.thermal.has_value());
     const Eigen::Isometry3d T_camera_lidar = rgb.T_world_camera.inverse() * lidar.T_world_lidar;
     CHECK((cfg.T_sensor_source.matrix() - T_camera_lidar.matrix()).cwiseAbs().maxCoeff() < 1e-12);
+}
+
+TEST_CASE("example thermal config matches the synthetic thermal camera and reference LiDAR") {
+    const SensorConfig cfg =
+        fusion::load_sensor_config(FUSION_SOURCE_DIR "/configs/thermal_camera.yaml");
+    const fusion::testing::PinholeCamera thermal = fusion::testing::make_thermal_camera();
+    const fusion::testing::LidarConfig lidar = fusion::testing::make_reference_lidar();
+    CHECK(cfg.name == "thermal");
+    CHECK(cfg.width == thermal.K.width);
+    CHECK(cfg.height == thermal.K.height);
+    CHECK(cfg.K(0, 0) == thermal.K.fx);
+    CHECK(cfg.K(1, 1) == thermal.K.fy);
+    CHECK(cfg.K(0, 2) == thermal.K.cx);
+    CHECK(cfg.K(1, 2) == thermal.K.cy);
+    CHECK(cfg.distortion.is_zero());
+    CHECK(cfg.source_frame == "lidar");
+    CHECK(cfg.time_offset_ns == 0);
+    const Eigen::Isometry3d T_thermal_lidar =
+        thermal.T_world_camera.inverse() * lidar.T_world_lidar;
+    CHECK((cfg.T_sensor_source.matrix() - T_thermal_lidar.matrix()).cwiseAbs().maxCoeff() < 1e-12);
+    REQUIRE(cfg.thermal.has_value());
+    CHECK(cfg.thermal->planck.R == 380747.0);
+    CHECK(cfg.thermal->planck.B == 1428.0);
+    CHECK(cfg.thermal->planck.F == 1.0);
+    CHECK(cfg.thermal->planck.O == -88.539);
+}
+
+TEST_CASE("thermal section errors are reported by field") {
+    const std::string base = kValid + "thermal:\n  planck: {R: 380747, B: 1428, F: 1, O: -88.539}\n";
+    const SensorConfig cfg = fusion::parse_sensor_config(base);
+    REQUIRE(cfg.thermal.has_value());
+    CHECK(cfg.thermal->planck.O == -88.539);
+    CHECK_FALSE(fusion::parse_sensor_config(kValid).thermal.has_value());
+
+    check_error(kValid + "thermal:\n", {"thermal: missing value"});
+    check_error(kValid + "thermal:\n  other: 1\n", {"thermal.planck: missing required field"});
+    check_error(kValid + "thermal:\n  planck: {R: 380747, B: 1428, F: 1}\n",
+                {"thermal.planck.O: missing required field"});
+    check_error(kValid + "thermal:\n  planck: {R: 380747, B: abc, F: 1, O: 0}\n",
+                {"thermal.planck.B: expected a number"});
+    check_error(kValid + "thermal:\n  planck: {R: 0, B: 1428, F: 1, O: 0}\n",
+                {"thermal.planck.R: must be positive"});
+    check_error(kValid + "thermal:\n  planck: {R: 380747, B: -1, F: 1, O: 0}\n",
+                {"thermal.planck.B: must be positive"});
+    check_error(kValid + "thermal:\n  planck: {R: 380747, B: 1428, F: .inf, O: 0}\n",
+                {"thermal.planck.F: must be finite"});
 }
 
 TEST_CASE("slightly non-orthonormal rotation is accepted and re-orthonormalized") {

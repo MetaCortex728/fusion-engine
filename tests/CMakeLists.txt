@@ -19,7 +19,9 @@ add_executable(fusion_tests
     test_geometry.cpp
     test_projection_scene.cpp
     test_depth_map.cpp
-    test_config.cpp)
+    test_config.cpp
+    test_thermal.cpp
+    test_thermal_projection.cpp)
 target_link_libraries(fusion_tests PRIVATE
     fusion::fusion fusion_test_support doctest fusion_options)
 

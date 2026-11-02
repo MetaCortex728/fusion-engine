@@ -86,6 +86,32 @@ std::vector<double> PinholeCamera::render_depth(const Scene& scene, double max_d
     return depth;
 }
 
+std::vector<int> PinholeCamera::render_surfaces(const Scene& scene, double max_distance) const {
+    const std::size_t w = static_cast<std::size_t>(K.width);
+    const std::size_t h = static_cast<std::size_t>(K.height);
+    std::vector<int> surfaces(w * h, kNoSurface);
+    for (std::size_t row = 0; row < h; ++row) {
+        for (std::size_t col = 0; col < w; ++col) {
+            const Ray ray =
+                pixel_ray_world(static_cast<double>(col), static_cast<double>(row));
+            if (auto hit = scene.raycast(ray.origin, ray.direction, max_distance)) {
+                surfaces[row * w + col] = hit->surface;
+            }
+        }
+    }
+    return surfaces;
+}
+
+std::vector<std::uint16_t> PinholeCamera::render_raw(const Scene& scene, double max_distance,
+                                                     std::uint16_t background) const {
+    const std::vector<int> surfaces = render_surfaces(scene, max_distance);
+    std::vector<std::uint16_t> raw(surfaces.size(), background);
+    for (std::size_t i = 0; i < surfaces.size(); ++i) {
+        if (surfaces[i] != kNoSurface) raw[i] = scene.raw_of(surfaces[i]);
+    }
+    return raw;
+}
+
 PinholeCamera make_rgb_camera() {
     PinholeCamera cam;
     cam.K = {500.0, 500.0, 319.5, 239.5, 640, 480};
@@ -133,7 +159,8 @@ std::vector<LidarPoint> scan(const Scene& scene, const LidarConfig& config) {
             auto hit = scene.raycast(config.T_world_lidar.translation(), d_world, config.max_range);
             if (!hit || hit->distance < config.min_range) continue;
             const double range = hit->distance + n;
-            points.push_back({range * d_lidar, range, static_cast<int>(ring), col});
+            points.push_back(
+                {range * d_lidar, range, static_cast<int>(ring), col, hit->surface});
         }
     }
     return points;

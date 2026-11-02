@@ -200,6 +200,19 @@ SensorConfig parse(const YAML::Node& root, const Parser& p) {
     }
 
     cfg.time_offset_ns = p.integer(p.child(root, "", "time_offset_ns"), "time_offset_ns");
+
+    if (root["thermal"].IsDefined()) {
+        const YAML::Node th = p.child(root, "", "thermal");
+        const YAML::Node pl = p.child(th, "thermal", "planck");
+        PlanckParams planck;
+        planck.R = p.number(p.child(pl, "thermal.planck", "R"), "thermal.planck.R");
+        planck.B = p.number(p.child(pl, "thermal.planck", "B"), "thermal.planck.B");
+        planck.F = p.number(p.child(pl, "thermal.planck", "F"), "thermal.planck.F");
+        planck.O = p.number(p.child(pl, "thermal.planck", "O"), "thermal.planck.O");
+        if (!(planck.R > 0.0)) p.fail("thermal.planck.R", "must be positive", &pl);
+        if (!(planck.B > 0.0)) p.fail("thermal.planck.B", "must be positive", &pl);
+        cfg.thermal = ThermalCalibration{planck};
+    }
     return cfg;
 }
 
