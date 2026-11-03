@@ -142,6 +142,7 @@ TEST_CASE("fuse_cli runs the synthetic sequence end to end") {
             if (!frame[i][column(fh, "thermal_u")].empty()) {
                 ++thermal_visible;
                 CHECK_FALSE(frame[i][column(fh, "thermal_raw")].empty());
+                CHECK_FALSE(frame[i][column(fh, "thermal_celsius")].empty());
             }
         }
         CHECK(r[column(h, "rgb_projected")] == std::to_string(rgb_visible));

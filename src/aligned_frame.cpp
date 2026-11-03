@@ -75,9 +75,19 @@ CameraFrame camera_frame(const FrameInputs& in, const CameraInput& cam, bool the
         }
         // Throws std::invalid_argument for an image of the wrong size.
         ThermalProjection tp = project_to_thermal(model, T_camera_lidar, points, *cam.thermal_image);
+        const std::optional<ThermalCalibration>& cal = cam.config->thermal;
+        if (cal) validate(*cal);  // throws std::invalid_argument
         for (const ThermalSample& s : tp.samples) {
-            out.points[s.point_index].projection = s.projection;
-            out.points[s.point_index].raw = s.raw;
+            PointInCamera& p = out.points[s.point_index];
+            p.projection = s.projection;
+            p.raw = s.raw;
+            if (cal) {
+                try {
+                    p.celsius = raw_to_celsius(s.raw, *cal);
+                } catch (const std::domain_error&) {
+                    // Not convertible: leave empty.
+                }
+            }
         }
         out.projected_count = tp.samples.size();
         out.depth = std::move(tp.depth);
@@ -109,7 +119,7 @@ void put_camera(std::ostream& out, const std::optional<CameraFrame>& cam, std::s
     const PointInCamera* p = nullptr;
     if (cam && i < cam->points.size() && cam->points[i].projection) p = &cam->points[i];
     if (p == nullptr) {
-        out << (thermal ? ",,,,," : ",,,,");
+        out << (thermal ? ",,,,,," : ",,,,");
         return;
     }
     out << ',';
@@ -121,6 +131,8 @@ void put_camera(std::ostream& out, const std::optional<CameraFrame>& cam, std::s
     if (thermal) {
         out << ',';
         if (p->raw) put(out, static_cast<unsigned>(*p->raw));
+        out << ',';
+        if (p->celsius) put(out, *p->celsius);
     }
     out << ',' << (p->nearest ? '1' : '0');
 }
@@ -146,7 +158,7 @@ AlignedFrame build_aligned_frame(const FrameInputs& inputs) {
 
 void write_aligned_frame_csv(std::ostream& out, const AlignedFrame& frame) {
     out << "point,x,y,z,intensity,rgb_u,rgb_v,rgb_depth,rgb_nearest,"
-           "thermal_u,thermal_v,thermal_depth,thermal_raw,thermal_nearest\n";
+           "thermal_u,thermal_v,thermal_depth,thermal_raw,thermal_celsius,thermal_nearest\n";
     for (std::size_t i = 0; i < frame.points.size(); ++i) {
         put(out, i);
         for (int k = 0; k < 3; ++k) {

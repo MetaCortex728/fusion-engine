@@ -170,17 +170,18 @@ void draw_depth(fusion::RgbImage& img, const fusion::SparseDepthMap& depth) {
     }
 }
 
-// Thermal image for display: with Planck constants, Celsius windowed to the
-// image's range and the hot colormap; without, raw counts stretched to grey.
+// Thermal image for display: with a configured conversion (Planck or linear),
+// Celsius windowed to the image's range and the hot colormap; without, raw
+// counts stretched to grey.
 fusion::RgbImage render_thermal(const fusion::RawThermalImage& raw,
                                 const fusion::SensorConfig& config) {
     if (config.thermal) {
-        const fusion::PlanckParams& planck = config.thermal->planck;
+        const fusion::ThermalCalibration& cal = *config.thermal;
         double lo = std::numeric_limits<double>::infinity();
         double hi = -lo;
         for (std::uint16_t v : raw.values()) {
             try {
-                const double c = fusion::raw_to_celsius(v, planck);
+                const double c = fusion::raw_to_celsius(v, cal);
                 lo = std::min(lo, c);
                 hi = std::max(hi, c);
             } catch (const std::domain_error&) {
@@ -188,7 +189,7 @@ fusion::RgbImage render_thermal(const fusion::RawThermalImage& raw,
         }
         if (lo <= hi) {
             const fusion::WindowLevel w{0.5 * (lo + hi), std::max(hi - lo, 0.1)};
-            return fusion::render_display(raw, planck, w);
+            return fusion::render_display(raw, cal, w);
         }
     }
     const auto [mn, mx] = std::minmax_element(raw.values().begin(), raw.values().end());

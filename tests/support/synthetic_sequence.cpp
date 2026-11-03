@@ -122,7 +122,11 @@ std::string config_yaml(const fusion::SensorConfig& c) {
       << "  rotation: " << matrix_yaml(c.T_sensor_source.linear()) << "\n"
       << "  translation: " << vector_yaml(c.T_sensor_source.translation()) << "\n"
       << "time_offset_ns: " << c.time_offset_ns << "\n";
-    if (c.thermal) {
+    if (c.thermal && c.thermal->encoding == fusion::ThermalEncoding::linear) {
+        const fusion::LinearParams& p = c.thermal->linear;
+        y << "thermal:\n  encoding: linear\n  linear: {scale: " << num(p.scale)
+          << ", offset: " << num(p.offset) << "}\n";
+    } else if (c.thermal) {
         const fusion::PlanckParams& p = c.thermal->planck;
         y << "thermal:\n  planck: {R: " << num(p.R) << ", B: " << num(p.B) << ", F: " << num(p.F)
           << ", O: " << num(p.O) << "}\n";
@@ -165,7 +169,7 @@ SyntheticSequence make_synthetic_sequence(int scans) {
     // Cameras.
     s.rgb.config = camera_config("rgb", rig.camera_K, rig.T_camera_lidar(), -2 * kMs);
     s.thermal.config = camera_config("thermal", rig.thermal_K, rig.T_thermal_lidar(), 5 * kMs);
-    s.thermal.config.thermal = fusion::ThermalCalibration{{380747.0, 1428.0, 1.0, -88.539}};
+    s.thermal.config.thermal = fusion::ThermalCalibration::from_planck({380747.0, 1428.0, 1.0, -88.539});
     for (std::size_t j = 0; j < 2 * n; ++j) {
         s.rgb.stamps_ref_ns.push_back(t_l[0] + 33 * kMs + 50 * kMs * static_cast<std::int64_t>(j));
     }

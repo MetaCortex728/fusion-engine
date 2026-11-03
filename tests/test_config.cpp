@@ -142,6 +142,58 @@ TEST_CASE("thermal section errors are reported by field") {
                 {"thermal.planck.F: must be finite"});
 }
 
+TEST_CASE("thermal encoding: planck by default, or linear with scale and offset") {
+    const SensorConfig def = fusion::parse_sensor_config(
+        kValid + "thermal:\n  planck: {R: 380747, B: 1428, F: 1, O: -88.539}\n");
+    REQUIRE(def.thermal.has_value());
+    CHECK(def.thermal->encoding == fusion::ThermalEncoding::planck);
+
+    const SensorConfig planck = fusion::parse_sensor_config(
+        kValid + "thermal:\n  encoding: planck\n  planck: {R: 380747, B: 1428, F: 1, O: -88.539}\n");
+    REQUIRE(planck.thermal.has_value());
+    CHECK(planck.thermal->encoding == fusion::ThermalEncoding::planck);
+    CHECK(planck.thermal->planck.R == 380747.0);
+
+    const SensorConfig linear = fusion::parse_sensor_config(
+        kValid + "thermal:\n  encoding: linear\n  linear: {scale: 0.01, offset: -273.15}\n");
+    REQUIRE(linear.thermal.has_value());
+    CHECK(linear.thermal->encoding == fusion::ThermalEncoding::linear);
+    CHECK(linear.thermal->linear.scale == 0.01);
+    CHECK(linear.thermal->linear.offset == -273.15);
+    CHECK(fusion::raw_to_celsius(0, *linear.thermal) == -273.15);
+
+    const SensorConfig negative = fusion::parse_sensor_config(
+        kValid + "thermal:\n  encoding: linear\n  linear: {scale: -0.1, offset: 0}\n");
+    CHECK(negative.thermal->linear.scale == -0.1);
+}
+
+TEST_CASE("thermal encoding errors are reported by field") {
+    const std::string th = kValid + "thermal:\n";
+    check_error(th + "  encoding: celsius\n  linear: {scale: 1, offset: 0}\n",
+                {"thermal.encoding: unknown encoding 'celsius'"});
+    check_error(th + "  encoding: linear\n", {"thermal.linear: missing required field"});
+    check_error(th + "  encoding: linear\n  linear: {offset: -273.15}\n",
+                {"thermal.linear.scale: missing required field"});
+    check_error(th + "  encoding: linear\n  linear: {scale: 0.01}\n",
+                {"thermal.linear.offset: missing required field"});
+    check_error(th + "  encoding: linear\n  linear: {scale: 0, offset: -273.15}\n",
+                {"thermal.linear.scale: must not be zero"});
+    check_error(th + "  encoding: linear\n  linear: {scale: .nan, offset: -273.15}\n",
+                {"thermal.linear.scale: must be finite"});
+    check_error(th + "  encoding: linear\n  linear: {scale: 0.01, offset: .inf}\n",
+                {"thermal.linear.offset: must be finite"});
+    check_error(th + "  encoding: linear\n  linear: {scale: abc, offset: 0}\n",
+                {"thermal.linear.scale: expected a number"});
+    check_error(th + "  encoding: linear\n  linear: {scale: 0.01, offset: -273.15}\n"
+                     "  planck: {R: 380747, B: 1428, F: 1, O: -88.539}\n",
+                {"thermal.planck: only allowed with encoding 'planck'"});
+    check_error(th + "  planck: {R: 380747, B: 1428, F: 1, O: -88.539}\n"
+                     "  linear: {scale: 0.01, offset: -273.15}\n",
+                {"thermal.linear: only allowed with encoding 'linear'"});
+    check_error(th + "  encoding: [linear]\n  linear: {scale: 0.01, offset: -273.15}\n",
+                {"thermal.encoding: expected a string"});
+}
+
 TEST_CASE("slightly non-orthonormal rotation is accepted and re-orthonormalized") {
     // cos(30 deg) and sin(30 deg) written with six decimals.
     const SensorConfig cfg = fusion::parse_sensor_config(with(

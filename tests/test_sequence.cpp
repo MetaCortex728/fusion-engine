@@ -154,6 +154,21 @@ TEST_CASE("sequence round trip: every reader returns the generator's values") {
     }
 }
 
+TEST_CASE("sequence with a linear thermal encoding loads it from the camera config") {
+    SyntheticSequence s = small_sequence();
+    s.thermal.config.thermal = fusion::ThermalCalibration::from_linear({0.01, -273.15});
+    const fusion::Sequence seq = fusion::load_sequence(write_synthetic_sequence(s, out_dir("linear")));
+    REQUIRE(seq.thermal);
+    REQUIRE(seq.thermal->config.thermal);
+    CHECK(seq.thermal->config.thermal->encoding == fusion::ThermalEncoding::linear);
+    CHECK(seq.thermal->config.thermal->linear.scale == 0.01);
+    CHECK(seq.thermal->config.thermal->linear.offset == -273.15);
+    // The raw values are read unchanged; only the conversion differs.
+    const fusion::RawThermalImage img =
+        fusion::read_thermal_frame(seq.thermal->frames[0].path, seq.thermal->config);
+    CHECK(img.values() == s.thermal_images[0].values());
+}
+
 TEST_CASE("16-bit PNG keeps every raw value, including ones a codec could shrink") {
     const std::string dir = out_dir("png16");
     fs::create_directories(dir);

@@ -2,7 +2,9 @@
 // rendering, and LiDAR projection into a thermal camera.
 //
 // Raw counts are the camera's 16-bit values and are never modified. Celsius
-// and display images are computed from them on demand.
+// and display images are computed from them on demand, either with Planck
+// constants (raw radiometric counts) or with a linear scale (cameras that
+// deliver temperature directly, e.g. in centi-kelvin).
 #pragma once
 
 #include <cstddef>
@@ -71,6 +73,55 @@ void validate(const PlanckParams& params);
 /// (division by zero), or when the result is not above absolute zero.
 double raw_to_celsius(std::uint16_t raw, const PlanckParams& params);
 
+/// Linear encoding for radiometric cameras that deliver temperature directly:
+///
+///   T = raw * scale + offset     (degrees Celsius)
+///
+/// For centi-kelvin, scale = 0.01 and offset = -273.15. Valid parameters are
+/// finite with scale != 0. There is no absolute-zero check: the mapping is
+/// whatever the camera defines, and every raw value converts.
+struct LinearParams {
+    double scale = 0.0;
+    double offset = 0.0;
+};
+
+/// Throws std::invalid_argument unless scale and offset are finite and
+/// scale != 0.
+void validate(const LinearParams& params);
+
+/// Converts a raw value to degrees Celsius with T = raw * scale + offset.
+/// Throws std::invalid_argument for invalid parameters (see validate()).
+double raw_to_celsius(std::uint16_t raw, const LinearParams& params);
+
+/// How a thermal camera's raw values encode temperature.
+enum class ThermalEncoding {
+    planck,  ///< raw counts, converted with PlanckParams
+    linear,  ///< temperature with a linear scale, converted with LinearParams
+};
+
+/// A thermal camera's raw-to-Celsius conversion: the encoding and its
+/// parameters. Only the parameters of the selected encoding are used.
+struct ThermalCalibration {
+    ThermalEncoding encoding = ThermalEncoding::planck;
+    PlanckParams planck;  ///< used when encoding == planck
+    LinearParams linear;  ///< used when encoding == linear
+
+    static ThermalCalibration from_planck(const PlanckParams& p) {
+        return {ThermalEncoding::planck, p, {}};
+    }
+    static ThermalCalibration from_linear(const LinearParams& p) {
+        return {ThermalEncoding::linear, {}, p};
+    }
+};
+
+/// Validates the parameters of the selected encoding. Throws
+/// std::invalid_argument.
+void validate(const ThermalCalibration& calibration);
+
+/// Converts with the selected encoding. Throws like the raw_to_celsius()
+/// overload for that encoding.
+double raw_to_celsius(std::uint16_t raw, const ThermalCalibration& calibration);
+
 /// Display window in degrees Celsius: `level` is the centre and `width` the
 /// span. Valid windows have finite values and width > 0.
 struct WindowLevel {
@@ -114,6 +165,10 @@ struct DisplayImage {
 /// converted (raw_to_celsius() throws std::domain_error) are drawn black.
 /// Throws std::invalid_argument for invalid constants or window.
 DisplayImage render_display(const RawThermalImage& raw, const PlanckParams& params,
+                            const WindowLevel& window);
+
+/// Same, with the camera's configured conversion (Planck or linear).
+DisplayImage render_display(const RawThermalImage& raw, const ThermalCalibration& calibration,
                             const WindowLevel& window);
 
 /// One LiDAR point projected into the thermal camera.

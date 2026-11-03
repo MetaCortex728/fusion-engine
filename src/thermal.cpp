@@ -93,6 +93,34 @@ double raw_to_celsius(std::uint16_t raw, const PlanckParams& p) {
     return kelvin - kCelsiusOffset;
 }
 
+void validate(const LinearParams& p) {
+    if (!std::isfinite(p.scale) || !std::isfinite(p.offset)) {
+        throw std::invalid_argument("linear thermal scale and offset must be finite");
+    }
+    if (p.scale == 0.0) throw std::invalid_argument("linear thermal scale must not be zero");
+}
+
+double raw_to_celsius(std::uint16_t raw, const LinearParams& p) {
+    validate(p);
+    return static_cast<double>(raw) * p.scale + p.offset;
+}
+
+void validate(const ThermalCalibration& c) {
+    switch (c.encoding) {
+        case ThermalEncoding::planck: validate(c.planck); return;
+        case ThermalEncoding::linear: validate(c.linear); return;
+    }
+    throw std::invalid_argument("unknown thermal encoding");
+}
+
+double raw_to_celsius(std::uint16_t raw, const ThermalCalibration& c) {
+    switch (c.encoding) {
+        case ThermalEncoding::planck: return raw_to_celsius(raw, c.planck);
+        case ThermalEncoding::linear: return raw_to_celsius(raw, c.linear);
+    }
+    throw std::invalid_argument("unknown thermal encoding");
+}
+
 double window_level(double celsius, const WindowLevel& window) {
     validate_window(window);
     if (!std::isfinite(celsius)) {
@@ -110,7 +138,12 @@ Rgb8 hot_colormap(double v) {
 
 DisplayImage render_display(const RawThermalImage& raw, const PlanckParams& params,
                             const WindowLevel& window) {
-    validate(params);
+    return render_display(raw, ThermalCalibration::from_planck(params), window);
+}
+
+DisplayImage render_display(const RawThermalImage& raw, const ThermalCalibration& calibration,
+                            const WindowLevel& window) {
+    validate(calibration);
     validate_window(window);
     DisplayImage out;
     out.width = raw.width();
@@ -119,7 +152,7 @@ DisplayImage render_display(const RawThermalImage& raw, const PlanckParams& para
     for (const std::uint16_t s : raw.values()) {
         Rgb8 color;  // black when the raw value cannot be converted
         try {
-            color = hot_colormap(window_level(raw_to_celsius(s, params), window));
+            color = hot_colormap(window_level(raw_to_celsius(s, calibration), window));
         } catch (const std::domain_error&) {
             // Leave the pixel black.
         }
