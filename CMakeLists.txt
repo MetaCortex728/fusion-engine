@@ -51,7 +51,10 @@ add_library(fusion STATIC
     src/config.cpp
     src/depth_map.cpp
     src/geometry.cpp
+    src/lidar.cpp
+    src/pose.cpp
     src/thermal.cpp
+    src/time.cpp
     src/version.cpp)
 add_library(fusion::fusion ALIAS fusion)
 target_include_directories(fusion PUBLIC

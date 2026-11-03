@@ -2,7 +2,7 @@
 
 ## Build and test
 
-Presets: `default` (GCC), `clang`, `asan` (Clang, ASan + UBSan), and
+Presets: `default` (GCC), `clang`, `asan` (GCC, ASan + UBSan), and
 `ci-default`, `ci-clang`, `ci-asan` (same, warnings as errors). Build dir is
 `build/<preset>`.
 

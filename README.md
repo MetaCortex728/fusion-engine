@@ -3,8 +3,10 @@
 > **Status: early-stage.** The library can load a per-sensor YAML config,
 > project LiDAR points into a distorted pinhole camera, build a sparse depth
 > map, convert raw thermal counts to degrees Celsius, render them for display,
-> and project LiDAR points into a thermal camera. Time alignment, aligned
-> frames, and dataset adapters do not exist yet. There is no release.
+> and project LiDAR points into a thermal camera. It can associate sensor
+> timestamps, interpolate a body trajectory, and move a whole LiDAR scan to a
+> camera's capture time. Aligned frames and dataset adapters do not exist
+> yet. There is no release.
 
 ## What it does
 
@@ -51,6 +53,9 @@ sudo apt-get install cmake ninja-build g++ clang libeigen3-dev libyaml-cpp-dev
 | `fusion/config.hpp`      | `load_sensor_config()` / `parse_sensor_config()` read a per-sensor YAML file into `SensorConfig`: name, resolution, intrinsics `K`, distortion `[k1, k2, p1, p2, k3]`, extrinsics `T_<sensor>_<source>`, and `time_offset_ns`. Thermal cameras add an optional `thermal.planck` section with the constants `R`, `B`, `F`, `O`, which loads into `SensorConfig::thermal`. Problems throw `ConfigError` naming the file and field, e.g. a missing field, a wrong shape, or a rotation that is not invertible or not orthonormal. |
 | `fusion/geometry.hpp`    | `CameraModel`: pinhole with radial-tangential distortion, `distort()` / `undistort()`, and `project()`. `project_point(camera, T_camera_lidar, p_lidar)` returns the sub-pixel position, pixel index, and z-depth. Only points with z > 0 that land inside the image are kept. Points beyond the radius where radial distortion stops being monotonic are also rejected, so they cannot fold back into the image. |
 | `fusion/depth_map.hpp`   | `SparseDepthMap` over the camera's pixel grid, keeping the nearest depth per pixel, and `project_to_depth_map()` to fill one from a point cloud. |
+| `fusion/time.hpp`        | Times are `int64_t` nanoseconds (`TimeNs`). `to_reference_time()` applies a sensor's `time_offset_ns` (`t_reference = t_sensor + time_offset_ns`). `associate()` pairs each reference time (the LiDAR's, by default) with the other sensor's nearest measurement, takes the earlier one on an exact tie, and accepts it only if `|t_j - t_ref| <= tau`. An overload takes sensor-clock stamps plus both offsets. Every reference time gets a result, rejected ones included, with `delta_t_ns = t_match_ns - t_ref_ns`. `default_tau_ns()` gives half the slower sensor's period. `write_association_csv()` writes `t_ref_ns,t_match_ns,delta_t_ns,accepted`. |
+| `fusion/pose.hpp`        | `StampedPose` (time, `Eigen::Vector3d` position, `Eigen::Quaterniond` orientation) and `Trajectory`, which holds poses with strictly increasing times and rejects unsorted or duplicate times. `interpolate(t)` and `T_world_body(t)` use `alpha = (t - t_i) / (t_{i+1} - t_i)`, linear position, and slerp along the shortest arc (`slerp_shortest()`). Times outside the trajectory throw `std::out_of_range`; there is no extrapolation. |
+| `fusion/lidar.hpp`       | Scan-level motion compensation. `compensate_scan()` moves a scan taken at `t_l` to a camera time `t_c`: `p_L(t_c) = T_body_lidar^-1 * T_world_body(t_c)^-1 * T_world_body(t_l) * T_body_lidar * p_L`. The points stay in the LiDAR frame, so projection with `T_camera_lidar` applies unchanged. `scan_motion_transform()` returns that transform. |
 | `fusion/thermal.hpp`     | `RawThermalImage` holds raw `uint16_t` counts unchanged. `raw_to_celsius()` applies `T = B / ln(R / (S - O) + F) - 273.15` and throws `std::domain_error` when the result is undefined: S equal to O, a logarithm argument that is not positive or equals 1, or a result at or below absolute zero. `window_level()` computes `clamp((T - (L - W / 2)) / W, 0, 1)` and rejects W <= 0. `hot_colormap()` maps that value to 8-bit RGB, black through red and yellow to white. `render_display()` builds a separate display image and only reads the raw image. `project_to_thermal()` projects LiDAR points with `project_point()`. It returns the thermal `SparseDepthMap` and, for every projected point, its pixel, its depth, and the raw count at that pixel. |
 
 Conventions: pixel centres sit at integer coordinates, so the image spans
@@ -90,6 +95,26 @@ const fusion::ThermalProjection tp = fusion::project_to_thermal(
 for (const auto& s : tp.samples) { /* s.point_index, s.projection, s.raw */ }
 ```
 
+```cpp
+#include <fusion/lidar.hpp>
+#include <fusion/time.hpp>
+
+// LiDAR stamps are the reference; the camera config's time_offset_ns moves
+// camera stamps onto the reference clock.
+const fusion::TimeNs tau = fusion::default_tau_ns(lidar_period_ns, camera_period_ns);
+const auto matches = fusion::associate(lidar_stamps, lidar_offset_ns,
+                                       camera_stamps, camera_cfg.time_offset_ns, tau);
+fusion::write_association_csv("association.csv", matches);
+
+const fusion::Trajectory trajectory(poses);  // std::vector<fusion::StampedPose>, T_world_body
+for (const auto& m : matches) {
+    if (!m.accepted) continue;
+    const auto points_at_camera_time = fusion::compensate_scan(
+        scan_points, trajectory, T_body_lidar, m.t_ref_ns, m.t_match_ns);
+    // project points_at_camera_time with camera_cfg.T_sensor_source (T_camera_lidar)
+}
+```
+
 ### Build and test
 
 Each preset builds into `build/<preset>`:
@@ -102,15 +127,14 @@ cmake --preset default && cmake --build --preset default && ctest --preset defau
 |-----------|----------|-----------------------------------------|
 | `default` | GCC      | RelWithDebInfo                          |
 | `clang`   | Clang    | RelWithDebInfo                          |
-| `asan`    | Clang    | Debug with AddressSanitizer and UBSan   |
+| `asan`    | GCC      | Debug with AddressSanitizer and UBSan   |
 
 The `ci-default`, `ci-clang`, and `ci-asan` presets do the same but treat
 warnings as errors.
 
-In some environments, binaries built with Clang 14 ASan sometimes segfault at
-startup, before any test runs. This was seen on WSL2 with a 6.18 kernel, where
-an empty ASan program crashes the same way. If `asan` or `ci-asan` fails with
-`SEGFAULT` and prints no doctest output, rerun it.
+The ASan presets use GCC because Clang 14's ASan runtime crashes at startup
+in about one run in four under newer kernels with larger address-space
+randomization (seen on WSL2 with a 6.18 kernel), while GCC 11's does not.
 
 ### Synthetic test scene
 
@@ -126,6 +150,27 @@ points from the virtual LiDAR into the virtual cameras and compare the result
 against ray-cast depth. For the thermal camera they also check that each
 LiDAR point reads its surface's raw value. Points within 2 pixels of a
 surface boundary in the rendered image are left out of that check.
+
+The scene also has a moving rig (`make_moving_rig()`): a body moving at a
+constant 8 m/s with a constant 0.6 rad/s yaw rate, carrying a LiDAR and the
+RGB camera, both rigidly mounted. The LiDAR takes an instantaneous scan at
+`t_l`, and the camera captures at `t_c = t_l + 33 ms`. Ground truth is the
+scene ray-cast from the camera's true pose at `t_c`. The compensation test
+samples the body's trajectory every 40 ms, compensates the scan to `t_c`, and
+compares projected depth with ray-cast depth. After compensation all 493
+projected box points and 964 of 994 projected points overall agree within
+1e-9 relative depth, the same tolerance as the static RGB test; the rest are
+occluded from the camera. The median depth error is below 1e-15 m. Without
+compensation, none of the 493 box points agree and the median depth error
+is 0.26 m on box points and 0.25 m over all points. Ground points are
+less affected because the planar motion keeps the ground plane in place.
+
+### Roadmap
+
+- Per-point deskew: moving each LiDAR point by its own capture time within
+  the sweep. This needs per-point timestamps, which MS2 does not provide, so
+  only scan-level compensation exists for now.
+- Aligned frames and dataset adapters.
 
 ### Development container
 

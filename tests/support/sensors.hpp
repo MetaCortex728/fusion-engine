@@ -102,7 +102,53 @@ struct LidarConfig {
 LidarConfig make_reference_lidar();
 
 // One full revolution. Beams that hit nothing within [min_range, max_range]
-// produce no point.
+// produce no point. The scan is instantaneous: every beam is cast from the
+// pose config.T_world_lidar.
 std::vector<LidarPoint> scan(const Scene& scene, const LidarConfig& config);
+
+// Body (x forward, y left, z up) moving with constant speed and constant yaw
+// rate: the position moves with a constant world-frame velocity and the yaw
+// about world +z grows linearly in time. Position and yaw are both linear in
+// time, so linear position interpolation and slerp between samples of this
+// motion reproduce it up to rounding.
+struct MovingBody {
+    std::int64_t t0_ns = 0;
+    Vec3 position0 = Vec3::Zero();  // world frame, at t0_ns
+    double yaw0 = 0.0;              // radians, at t0_ns
+    Vec3 velocity = Vec3::Zero();   // world frame, m/s
+    double yaw_rate = 0.0;          // rad/s
+
+    Vec3 position(std::int64_t t_ns) const;
+    double yaw(std::int64_t t_ns) const;
+    // True pose of the body at t_ns.
+    Rigid3 T_world_body(std::int64_t t_ns) const;
+};
+
+// A moving body carrying a LiDAR and the RGB camera, both rigidly mounted.
+// The LiDAR takes an instantaneous scan at t_lidar_ns; the camera captures
+// 33 ms later, at t_camera_ns.
+struct MovingRig {
+    MovingBody body;
+    Rigid3 T_body_lidar = Rigid3::Identity();
+    Rigid3 T_body_camera = Rigid3::Identity();
+    LidarConfig lidar;          // beams and ranges; its pose is set by lidar_at()
+    PinholeIntrinsics camera_K;
+    std::int64_t t_lidar_ns = 0;
+    std::int64_t t_camera_ns = 0;
+
+    // T_camera_lidar from the mounting: T_body_camera^-1 * T_body_lidar.
+    Rigid3 T_camera_lidar() const;
+    // The LiDAR config posed at the body's true pose at t_ns.
+    LidarConfig lidar_at(std::int64_t t_ns) const;
+    // The camera at the body's true pose at t_ns.
+    PinholeCamera camera_at(std::int64_t t_ns) const;
+};
+
+// Body at (-1, 0, 0) with yaw 0.02 rad at t0 = 2 s, moving at 8 m/s (world
+// velocity (8, 0.3, 0)) and yawing at 0.6 rad/s. The reference LiDAR beams
+// sit 1.8 m above the body origin, slightly tilted; the RGB camera's
+// intrinsics sit at (0.2, 0.1, 1.2) looking along body +x. The scan is at
+// t_lidar_ns = t0 + 107 ms and the camera captures at t_lidar_ns + 33 ms.
+MovingRig make_moving_rig();
 
 }  // namespace fusion::testing
