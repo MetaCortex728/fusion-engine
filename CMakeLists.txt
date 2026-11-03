@@ -25,6 +25,11 @@ if(MSVC)
 else()
     target_compile_options(fusion_options INTERFACE
         -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
+    # No fused multiply-add contraction: GCC contracts a * b + c by default on
+    # arm64 but not on x64, which made results differ in the last bit between
+    # the two CI architectures. Same arithmetic everywhere keeps outputs and
+    # exact test expectations reproducible.
+    target_compile_options(fusion_options INTERFACE -ffp-contract=off)
     if(FUSION_WARNINGS_AS_ERRORS)
         target_compile_options(fusion_options INTERFACE -Werror)
     endif()
