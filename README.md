@@ -2,14 +2,18 @@
 
 > **Status: early-stage.** The library can load a per-sensor YAML config,
 > project LiDAR points into a distorted pinhole camera, build a sparse depth
-> map, convert raw thermal counts to degrees Celsius, render them for display,
+> map, convert thermal images to degrees Celsius (raw counts with Planck
+> constants, or radiometric temperature with a linear scale such as
+> centi-kelvin), render them for display,
 > and project LiDAR points into a thermal camera. It can associate sensor
 > timestamps, interpolate a body trajectory, and move a whole LiDAR scan to a
 > camera's capture time. It builds an aligned frame per LiDAR scan, reads
 > sequences in its own [on-disk format](docs/sequence-format.md), and
 > `fuse_cli` runs a whole sequence. Besides synthetic data, its projection
 > and multi-LiDAR extrinsics have been checked on real sensor geometry from
-> A2D2 ([validation](docs/validation/a2d2.md)). There is no release.
+> A2D2 ([validation](docs/validation/a2d2.md)), and the linear thermal
+> encoding and rendering on real temperature fields from RGBDT LAENTIEC
+> ([validation](docs/validation/laentiec.md)). There is no release.
 
 ## What it does
 
@@ -58,16 +62,16 @@ sudo apt-get install cmake ninja-build g++ clang libeigen3-dev libyaml-cpp-dev
 
 | Header                   | Provides |
 |--------------------------|----------|
-| `fusion/config.hpp`      | `load_sensor_config()` / `parse_sensor_config()` read a per-sensor YAML file into `SensorConfig`: name, resolution, intrinsics `K`, distortion `[k1, k2, p1, p2, k3]`, extrinsics `T_<sensor>_<source>`, and `time_offset_ns`. Thermal cameras add an optional `thermal.planck` section with the constants `R`, `B`, `F`, `O`, which loads into `SensorConfig::thermal`. Problems throw `ConfigError` naming the file and field, e.g. a missing field, a wrong shape, or a rotation that is not invertible or not orthonormal. |
+| `fusion/config.hpp`      | `load_sensor_config()` / `parse_sensor_config()` read a per-sensor YAML file into `SensorConfig`: name, resolution, intrinsics `K`, distortion `[k1, k2, p1, p2, k3]`, extrinsics `T_<sensor>_<source>`, and `time_offset_ns`. Thermal cameras add an optional `thermal` section, which loads into `SensorConfig::thermal` (a `ThermalCalibration`). `encoding: planck` (the default) takes `thermal.planck` with the constants `R`, `B`, `F`, `O`. `encoding: linear` takes `thermal.linear` with `scale` and `offset` (see [thermal encoding](docs/sequence-format.md#thermal-encoding)). Problems throw `ConfigError` naming the file and field, e.g. a missing field, a wrong shape, or a rotation that is not invertible or not orthonormal. |
 | `fusion/geometry.hpp`    | `CameraModel`: pinhole with radial-tangential distortion, `distort()` / `undistort()`, and `project()`. `project_point(camera, T_camera_lidar, p_lidar)` returns the sub-pixel position, pixel index, and z-depth. Only points with z > 0 that land inside the image are kept. Points beyond the radius where radial distortion stops being monotonic are also rejected, so they cannot fold back into the image. |
 | `fusion/depth_map.hpp`   | `SparseDepthMap` over the camera's pixel grid, keeping the nearest depth per pixel, and `project_to_depth_map()` to fill one from a point cloud. |
 | `fusion/time.hpp`        | Times are `int64_t` nanoseconds (`TimeNs`). `to_reference_time()` applies a sensor's `time_offset_ns` (`t_reference = t_sensor + time_offset_ns`). `associate()` pairs each reference time (the LiDAR's, by default) with the other sensor's nearest measurement, takes the earlier one on an exact tie, and accepts it only if `|t_j - t_ref| <= tau`. An overload takes sensor-clock stamps plus both offsets. Every reference time gets a result, rejected ones included, with `delta_t_ns = t_match_ns - t_ref_ns`. `default_tau_ns()` gives half the slower sensor's period. `write_association_csv()` writes `t_ref_ns,t_match_ns,delta_t_ns,accepted`. |
 | `fusion/pose.hpp`        | `StampedPose` (time, `Eigen::Vector3d` position, `Eigen::Quaterniond` orientation) and `Trajectory`, which holds poses with strictly increasing times and rejects unsorted or duplicate times. `interpolate(t)` and `T_world_body(t)` use `alpha = (t - t_i) / (t_{i+1} - t_i)`, linear position, and slerp along the shortest arc (`slerp_shortest()`). Times outside the trajectory throw `std::out_of_range`; there is no extrapolation. |
 | `fusion/lidar.hpp`       | Scan-level motion compensation. `compensate_scan()` moves a scan taken at `t_l` to a camera time `t_c`: `p_L(t_c) = T_body_lidar^-1 * T_world_body(t_c)^-1 * T_world_body(t_l) * T_body_lidar * p_L`. The points stay in the LiDAR frame, so projection with `T_camera_lidar` applies unchanged. `scan_motion_transform()` returns that transform. |
-| `fusion/aligned_frame.hpp` | `build_aligned_frame()` builds the fused result for one LiDAR scan at `t_l`. For each camera input (RGB, thermal; each optional) it takes the `Association` for `t_l` and records its `delta_t_ns` and `accepted` flag. For an accepted camera, the scan is compensated to the camera's time when a trajectory covers both times (`compensated` says whether it was), then projected with `project_point()` into a `SparseDepthMap`. Per point and camera, the frame holds the pixel and depth, or "not visible", whether the point is the nearest at its pixel, and for thermal the raw count. The frame copies everything it needs; inputs are only read. `write_aligned_frame_csv()` writes the per-point output. |
+| `fusion/aligned_frame.hpp` | `build_aligned_frame()` builds the fused result for one LiDAR scan at `t_l`. For each camera input (RGB, thermal; each optional) it takes the `Association` for `t_l` and records its `delta_t_ns` and `accepted` flag. For an accepted camera, the scan is compensated to the camera's time when a trajectory covers both times (`compensated` says whether it was), then projected with `project_point()` into a `SparseDepthMap`. Per point and camera, the frame holds the pixel and depth, or "not visible", whether the point is the nearest at its pixel, and for thermal the raw count and its temperature in °C, converted with the camera's configured encoding. The frame copies everything it needs; inputs are only read. `write_aligned_frame_csv()` writes the per-point output. |
 | `fusion/sequence.hpp`    | `fusion_io` library. Reads the [sequence format](docs/sequence-format.md): `load_sequence()` validates the manifest, camera configs, list files and trajectory, and checks that every listed file exists. It also provides readers for LiDAR `.bin` scans, RGB and thermal frames (with an image size check against the config) and the trajectory CSV, plus writers for adapters. `associate_camera()` and `camera_tau_ns()` associate a camera's frames with the scans. Problems throw `SequenceError` naming the file (and line). |
 | `fusion/image_io.hpp`    | `fusion_io` library. 8-bit RGB PNG and 16-bit greyscale thermal PNG reading and writing via LodePNG. Raw thermal counts round-trip bit-exactly. |
-| `fusion/thermal.hpp`     | `RawThermalImage` holds raw `uint16_t` counts unchanged. `raw_to_celsius()` applies `T = B / ln(R / (S - O) + F) - 273.15` and throws `std::domain_error` when the result is undefined: S equal to O, a logarithm argument that is not positive or equals 1, or a result at or below absolute zero. `window_level()` computes `clamp((T - (L - W / 2)) / W, 0, 1)` and rejects W <= 0. `hot_colormap()` maps that value to 8-bit RGB, black through red and yellow to white. `render_display()` builds a separate display image and only reads the raw image. `project_to_thermal()` projects LiDAR points with `project_point()`. It returns the thermal `SparseDepthMap` and, for every projected point, its pixel, its depth, and the raw count at that pixel. |
+| `fusion/thermal.hpp`     | `RawThermalImage` holds raw `uint16_t` values unchanged. `raw_to_celsius()` has three overloads. With `PlanckParams` it applies `T = B / ln(R / (S - O) + F) - 273.15` and throws `std::domain_error` when the result is undefined: S equal to O, a logarithm argument that is not positive or equals 1, or a result at or below absolute zero. With `LinearParams` it applies `T = raw * scale + offset` (scale 0.01 and offset -273.15 for centi-kelvin) and rejects a non-finite or zero scale and a non-finite offset. With a `ThermalCalibration` it uses whichever encoding the config selected. `window_level()` computes `clamp((T - (L - W / 2)) / W, 0, 1)` and rejects W <= 0. `hot_colormap()` maps that value to 8-bit RGB, black through red and yellow to white. `render_display()` builds a separate display image with Planck constants or a `ThermalCalibration`, and only reads the raw image. `project_to_thermal()` projects LiDAR points with `project_point()`. It returns the thermal `SparseDepthMap` and, for every projected point, its pixel, its depth, and the raw count at that pixel. |
 
 Conventions: pixel centres sit at integer coordinates, so the image spans
 `[-0.5, width - 0.5) x [-0.5, height - 0.5)`. Depth is the z coordinate in
@@ -148,8 +152,8 @@ It writes to `out/fused`:
 
 | File | Contents |
 |------|----------|
-| `frame_NNNNNN.csv` | one row per scan point: `point,x,y,z,intensity`, then per camera `u,v,depth,nearest` (thermal adds `raw`); empty when the point is not visible or the image was rejected |
-| `overlay_rgb_NNNNNN.png`, `overlay_thermal_NNNNNN.png` | with `--overlay`: depth points (red near, blue far) drawn over the RGB image and over the thermal image rendered with the hot colormap |
+| `frame_NNNNNN.csv` | one row per scan point: `point,x,y,z,intensity`, then per camera `u,v,depth,nearest` (thermal adds `raw` and `celsius`; `celsius` is empty without a `thermal` section in the config); empty when the point is not visible or the image was rejected |
+| `overlay_rgb_NNNNNN.png`, `overlay_thermal_NNNNNN.png` | with `--overlay`: depth points (red near, blue far) drawn over the RGB image and over the thermal image, rendered in °C with the configured encoding and the hot colormap |
 | `summary.csv` | one row per frame: per camera the matched image index and time, `delta_t_ns`, `accepted`, `compensated`, number of projected points; then `read_ms`, `process_ms`, `write_ms` |
 | `summary.json` | median and p95 of `process_ms`, `read_ms` and `write_ms` |
 | `association_rgb.csv`, `association_thermal.csv` | the time association per camera (`write_association_csv()`) |
@@ -164,6 +168,20 @@ benchmark.
 
 Exit codes: 0 on success, 1 for a sequence or processing error (the message
 names the file), 2 for bad arguments.
+
+### Export thermal frames with `thermal_export`
+
+`thermal_export` converts every thermal frame of a sequence to °C with the
+camera's configured encoding. For each frame it writes the values as
+little-endian float64 (`celsius_NNNNNN.f64`) and a render with a per-image
+percentile window (`render_NNNNNN.png`, 1st to 99th percentile by default).
+`thermal_stats.csv` gets one row per frame: min, max, mean, the window,
+pixels outside it, and pure black and white display pixels. The
+[LAENTIEC check](docs/validation/laentiec.md) uses it.
+
+```sh
+build/default/apps/thermal_export out/synthetic/sequence.yaml --out out/thermal
+```
 
 ### Build and test
 
@@ -244,8 +262,10 @@ check that:
   the sweep. This needs per-point timestamps, which MS2 does not provide, so
   only scan-level compensation exists for now.
 - Dataset adapters that convert into the [sequence format](docs/sequence-format.md).
-  The first, for A2D2 in `tools/datasets/a2d2/`, is validation tooling: see
-  [docs/validation/a2d2.md](docs/validation/a2d2.md).
+  The first two are validation tooling: A2D2 in `tools/datasets/a2d2/`
+  ([docs/validation/a2d2.md](docs/validation/a2d2.md)) and RGBDT LAENTIEC
+  thermal in `tools/datasets/laentiec/`
+  ([docs/validation/laentiec.md](docs/validation/laentiec.md)).
 - Several LiDARs in one sequence. The format holds one LiDAR per sequence
   today, so the A2D2 chain check runs one sequence per LiDAR.
 

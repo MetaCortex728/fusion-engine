@@ -20,6 +20,12 @@ extrinsics:
   translation: [-0.14979443021318606, -0.5499389296403512, -0.011349111997504907]  # metres
 time_offset_ns: 0                # t_reference = t_sensor + time_offset_ns
 thermal:
+  # How raw values become degrees Celsius. `planck` (the default) is for raw
+  # radiometric counts; `linear` with {scale, offset} is for cameras that
+  # deliver temperature directly, e.g. centi-kelvin:
+  #   encoding: linear
+  #   linear: {scale: 0.01, offset: -273.15}    # T = raw * scale + offset
+  encoding: planck
   # Raw count S to degrees Celsius: T = B / ln(R / (S - O) + F) - 273.15.
   # Example constants for the synthetic camera.
   planck:

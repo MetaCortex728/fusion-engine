@@ -102,11 +102,48 @@ times are not part of format version 1.
 
 - **RGB**: 8-bit PNG, normally RGB. Greyscale, palette, and alpha variants
   are accepted and converted to RGB. 16-bit RGB images are rejected.
-- **Thermal**: 16-bit greyscale PNG holding the camera's raw counts
-  unchanged. Any other colour type or bit depth is rejected, so counts are
-  never rescaled on the way in.
+- **Thermal**: 16-bit greyscale PNG holding the camera's raw values
+  unchanged. Any other colour type or bit depth is rejected, so values are
+  never rescaled on the way in. The camera config's `thermal` section says
+  what the values mean (see below).
 - The image size must equal the `resolution` in the camera's config. This is
   checked when the image is read.
+
+### Thermal encoding
+
+The thermal camera config (format: `fusion/config.hpp`) has an optional
+`thermal` section that converts raw values to degrees Celsius. It is used
+for rendering and for the per-point `thermal_celsius` output. There are two
+encodings:
+
+```yaml
+thermal:
+  encoding: planck               # optional, the default
+  planck: {R: 380747, B: 1428, F: 1, O: -88.539}
+```
+
+`planck` is for raw radiometric counts S:
+`T = B / ln(R / (S - O) + F) - 273.15`, with finite constants, R > 0 and
+B > 0.
+
+```yaml
+thermal:
+  encoding: linear
+  linear: {scale: 0.01, offset: -273.15}
+```
+
+`linear` is for cameras that deliver temperature directly:
+`T = raw * scale + offset`, with finite values and `scale != 0`. The
+example is centi-kelvin, which many radiometric exports use (Optris, FLIR).
+Raw 0 is −273.15 °C and 65535 is 382.2 °C. To store temperatures in
+centi-kelvin, write `round((T + 273.15) * 100)` and check that it fits in
+0 to 65535. `tools/datasets/laentiec/convert.py` is an example.
+
+Only the selected encoding's section may be present. An unknown encoding,
+a missing or non-finite parameter, or a zero scale is a `ConfigError` that
+names the field, e.g. `thermal.linear.scale: must not be zero`. Without a
+`thermal` section the raw values are still read and written, but nothing is
+converted.
 
 ## Trajectory: `timestamp_ns,x,y,z,qw,qx,qy,qz`
 
