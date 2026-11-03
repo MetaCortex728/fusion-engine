@@ -7,8 +7,9 @@
 > timestamps, interpolate a body trajectory, and move a whole LiDAR scan to a
 > camera's capture time. It builds an aligned frame per LiDAR scan, reads
 > sequences in its own [on-disk format](docs/sequence-format.md), and
-> `fuse_cli` runs a whole sequence. It has been run only on synthetic data so
-> far. No dataset adapters exist yet, and there is no release.
+> `fuse_cli` runs a whole sequence. Besides synthetic data, its projection
+> and multi-LiDAR extrinsics have been checked on real sensor geometry from
+> A2D2 ([validation](docs/validation/a2d2.md)). There is no release.
 
 ## What it does
 
@@ -243,6 +244,10 @@ check that:
   the sweep. This needs per-point timestamps, which MS2 does not provide, so
   only scan-level compensation exists for now.
 - Dataset adapters that convert into the [sequence format](docs/sequence-format.md).
+  The first, for A2D2 in `tools/datasets/a2d2/`, is validation tooling: see
+  [docs/validation/a2d2.md](docs/validation/a2d2.md).
+- Several LiDARs in one sequence. The format holds one LiDAR per sequence
+  today, so the A2D2 chain check runs one sequence per LiDAR.
 
 ### Development container
 
