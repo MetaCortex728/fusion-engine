@@ -13,7 +13,11 @@
 > and multi-LiDAR extrinsics have been checked on real sensor geometry from
 > A2D2 ([validation](docs/validation/a2d2.md)), and the linear thermal
 > encoding and rendering on real temperature fields from RGBDT LAENTIEC
-> ([validation](docs/validation/laentiec.md)). There is no release.
+> ([validation](docs/validation/laentiec.md)). On a moving vehicle from
+> Boreas ([validation](docs/validation/boreas.md)), time association,
+> trajectory interpolation and projection with a real calibration work;
+> scan-level compensation runs but does not improve alignment there,
+> because the camera fires as the LiDAR sweeps past it. There is no release.
 
 ## What it does
 
@@ -183,6 +187,19 @@ pixels outside it, and pure black and white display pixels. The
 build/default/apps/thermal_export out/synthetic/sequence.yaml --out out/thermal
 ```
 
+### Query the engine with `fusion_probe`
+
+`fusion_probe` exposes two engine functions to validation scripts:
+`interpolate` evaluates a trajectory CSV at the nanosecond times listed in
+a file, and `gray` writes the RGB frames of a sequence, read with the same
+reader as `fuse_cli`, as raw 8-bit luminance. The
+[Boreas check](docs/validation/boreas.md) uses it.
+
+```sh
+build/default/apps/fusion_probe interpolate trajectory.csv --times times.csv --out poses.csv
+build/default/apps/fusion_probe gray out/synthetic/sequence.yaml --out out/gray --indices 0,5
+```
+
 ### Build and test
 
 Each preset builds into `build/<preset>`:
@@ -260,12 +277,16 @@ check that:
 
 - Per-point deskew: moving each LiDAR point by its own capture time within
   the sweep. This needs per-point timestamps, which MS2 does not provide, so
-  only scan-level compensation exists for now.
+  only scan-level compensation exists for now. Boreas has them: one sweep
+  spans about 104 ms, up to 0.95 m and 4.4° of vehicle motion
+  ([docs/validation/boreas.md](docs/validation/boreas.md)).
 - Dataset adapters that convert into the [sequence format](docs/sequence-format.md).
-  The first two are validation tooling: A2D2 in `tools/datasets/a2d2/`
+  The first three are validation tooling: A2D2 in `tools/datasets/a2d2/`
   ([docs/validation/a2d2.md](docs/validation/a2d2.md)) and RGBDT LAENTIEC
   thermal in `tools/datasets/laentiec/`
-  ([docs/validation/laentiec.md](docs/validation/laentiec.md)).
+  ([docs/validation/laentiec.md](docs/validation/laentiec.md)), and Boreas
+  in `tools/datasets/boreas/`
+  ([docs/validation/boreas.md](docs/validation/boreas.md)).
 - Several LiDARs in one sequence. The format holds one LiDAR per sequence
   today, so the A2D2 chain check runs one sequence per LiDAR.
 
