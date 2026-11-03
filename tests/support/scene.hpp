@@ -54,6 +54,10 @@ public:
     // kNoSurface or an unknown id.
     std::uint16_t raw_of(int surface) const;
 
+    // Replaces the thermal raw value of a surface id; the geometry is
+    // unchanged. Throws std::out_of_range for kNoSurface or an unknown id.
+    void set_raw(int surface, std::uint16_t raw);
+
     static constexpr std::uint16_t kDefaultGroundRaw = 14000;
     static constexpr std::uint16_t kDefaultBoxRaw = 20000;
 

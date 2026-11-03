@@ -124,7 +124,11 @@ thermal:
 
 `planck` is for raw radiometric counts S:
 `T = B / ln(R / (S - O) + F) - 273.15`, with finite constants, R > 0 and
-B > 0.
+B > 0. The example constants are the synthetic thermal camera's; they are
+illustrative, not a specific camera's calibration, but fit an uncooled LWIR
+camera (B = c2 / λ for an effective wavelength of 10.1 µm; 20 °C is raw
+2852, with about 49 counts per kelvin). Use the constants from your
+camera's calibration.
 
 ```yaml
 thermal:

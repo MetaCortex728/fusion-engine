@@ -104,6 +104,18 @@ std::uint16_t Scene::raw_of(int surface) const {
     return box_raw_[static_cast<std::size_t>(box)];
 }
 
+void Scene::set_raw(int surface, std::uint16_t raw) {
+    if (surface == kGroundSurface) {
+        ground_raw_ = raw;
+        return;
+    }
+    const int box = surface - kFirstBoxSurface;
+    if (box < 0 || box >= static_cast<int>(box_raw_.size())) {
+        throw std::out_of_range("Scene::set_raw: unknown surface");
+    }
+    box_raw_[static_cast<std::size_t>(box)] = raw;
+}
+
 bool Scene::on_surface(const Vec3& p, double tol) const {
     if (std::abs(p.z() - ground_z_) <= tol) return true;
     for (const Box& b : boxes_) {

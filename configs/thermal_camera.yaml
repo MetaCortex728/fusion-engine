@@ -27,7 +27,10 @@ thermal:
   #   linear: {scale: 0.01, offset: -273.15}    # T = raw * scale + offset
   encoding: planck
   # Raw count S to degrees Celsius: T = B / ln(R / (S - O) + F) - 273.15.
-  # Example constants for the synthetic camera.
+  # Illustrative constants for the synthetic camera, not the calibration of
+  # a specific camera. They fit an uncooled LWIR microbolometer: B = c2 /
+  # lambda for an effective wavelength of 10.1 um, and 10 to 60 degrees C
+  # maps to raw counts 2384 to 5222, about 49 counts per kelvin at 20 degrees C.
   planck:
     R: 380747
     B: 1428

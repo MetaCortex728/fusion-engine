@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -123,4 +124,64 @@ TEST_CASE("thermal_export rejects bad arguments") {
     CHECK(run_export(quote(std::string(FUSION_TEST_OUTPUT_DIR) + "/missing.yaml") + " --out " +
                          quote(std::string(FUSION_TEST_OUTPUT_DIR) + "/thermal_export_missing"),
                      log) != 0);
+}
+
+TEST_CASE("synthetic thermal scene has realistic apparent temperatures") {
+    // Expected counts and read-back temperatures computed separately with
+    // Python's decimal module at 50 significant digits from
+    // S = R / (exp(B / (T + 273.15)) - F) + O, rounded, and
+    // T = B / ln(R / (S - O) + F) - 273.15.
+    struct Case {
+        double celsius;
+        std::uint16_t raw;
+        double back;
+    };
+    const Case surfaces[] = {
+        {18.0, 2755, 18.009618623534798807},  // ground (road)
+        {45.0, 4239, 45.000775571147893681},  // warm box ahead
+        {22.0, 2951, 21.990069179437776924},  // wall
+        {12.0, 2474, 12.002635736574103780},  // low block
+        {26.0, 3156, 25.992338607353652018},  // floating block
+    };
+    const Case sky{-15.0, 1425, -14.999260924897754969};
+
+    REQUIRE(std::size(kSyntheticSurfaceCelsius) == std::size(surfaces));
+    const SyntheticSequence s = make_synthetic_sequence(2);
+    REQUIRE(s.thermal.config.thermal.has_value());
+    const fusion::ThermalCalibration& cal = *s.thermal.config.thermal;
+    CHECK(cal.encoding == fusion::ThermalEncoding::planck);
+    for (std::size_t i = 0; i < std::size(surfaces); ++i) {
+        CAPTURE(i);
+        const Case& c = surfaces[i];
+        CHECK(kSyntheticSurfaceCelsius[i] == c.celsius);
+        CHECK(celsius_to_raw(c.celsius, kSyntheticPlanck) == c.raw);
+        CHECK(s.scene.raw_of(static_cast<int>(i)) == c.raw);
+        CHECK(std::abs(fusion::raw_to_celsius(c.raw, cal) - c.back) <= 1e-9);
+        CHECK(std::abs(fusion::raw_to_celsius(c.raw, cal) - c.celsius) < 0.01);
+    }
+    CHECK(kSyntheticSkyCelsius == sky.celsius);
+    CHECK(celsius_to_raw(sky.celsius, kSyntheticPlanck) == sky.raw);
+    CHECK(std::abs(fusion::raw_to_celsius(sky.raw, cal) - sky.back) <= 1e-9);
+
+    // Every pixel of every thermal frame is one of these counts: road and
+    // walls 10-30 °C, the warm box 35-60 °C, the sky -15 °C.
+    std::set<std::uint16_t> seen;
+    for (const fusion::RawThermalImage& img : s.thermal_images) {
+        seen.insert(img.values().begin(), img.values().end());
+    }
+    for (const std::uint16_t v : seen) {
+        CAPTURE(v);
+        const bool known = v == sky.raw || std::any_of(std::begin(surfaces), std::end(surfaces),
+                                                       [&](const Case& c) { return c.raw == v; });
+        CHECK(known);
+    }
+    CHECK(seen.count(2755) == 1);  // the thermal camera sees the road,
+    CHECK(seen.count(4239) == 1);  // the warm box ahead
+    CHECK(seen.count(1425) == 1);  // and the sky
+
+    // The inverse rejects counts outside 16 bits and invalid constants.
+    CHECK_THROWS_AS(celsius_to_raw(-150.0, kSyntheticPlanck), std::domain_error);
+    CHECK_THROWS_AS(celsius_to_raw(600.0, kSyntheticPlanck), std::domain_error);
+    CHECK_THROWS_AS(celsius_to_raw(20.0, fusion::PlanckParams{0.0, 1428.0, 1.0, 0.0}),
+                    std::invalid_argument);
 }

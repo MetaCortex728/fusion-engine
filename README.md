@@ -14,12 +14,16 @@ It has been checked against synthetic ground truth and on three real datasets
 
 > **Status: early-stage.** No release yet, no stable API.
 
-![The fuse_cli web viewer on the synthetic sequence: the RGB image of frame 2
-with LiDAR points coloured by depth, and the side panel with association,
-point counts and latency](docs/images/viewer-synthetic.png)
+![The fuse_cli web viewer on the synthetic sequence: the RGB image of scan 2
+with LiDAR points coloured by their thermal-camera temperature, 18 °C road
+and a 45 °C box, and the side panel with association, point counts and
+latency](docs/images/viewer-synthetic.png)
 
-*The `fuse_cli --viewer` page for frame 2 of the synthetic sequence (rendered
-test scene, no dataset imagery). Captured with headless Chromium.*
+*The `fuse_cli --viewer` page for scan 2 of the synthetic sequence (rendered
+test scene, no dataset imagery), RGB view with points coloured by the
+temperature the thermal camera reads for them: the road at 18 °C, the warm
+box ahead at 45 °C, grey where the thermal camera has no value. Captured
+with headless Chromium.*
 
 ## Pipeline at a glance
 
@@ -264,7 +268,14 @@ none of the box points agree (median error 0.26 m).
 `tests/support/synthetic_sequence.hpp` turns the rig into a sequence: five
 10 Hz scans, 20 Hz RGB, 10 Hz thermal with one dropped frame, clock offsets,
 and a trajectory every 40 ms. Scan 0 has no RGB image and scan 3 no thermal
-image within `tau`, so both rejection paths run. The tests check that the
+image within `tau`, so both rejection paths run. Each thermal surface has
+an apparent temperature (road 18 °C, walls and blocks 12–26 °C, a warm
+vehicle-sized box 45 °C, sky −15 °C) converted to a raw count with the
+inverse of the camera's Planck model, so the thermal camera reads them back
+to within 0.01 °C. The Planck constants (R 380747, B 1428, F 1,
+O −88.539) are illustrative, not a specific camera's calibration, but fit an
+uncooled LWIR camera: B corresponds to a 10.1 µm effective wavelength and
+there are about 49 counts per kelvin at 20 °C. The tests check that the
 readers return the generator's values exactly, that association matches a
 brute-force search, that at least 96% of the projected points in each
 accepted image match ray-cast depth (1e-9 relative in memory, 1e-5 from the
