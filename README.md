@@ -299,11 +299,27 @@ Vendored code (LodePNG, zlib licence; doctest, MIT, tests only) is listed in
 validation keep their own licences; their pages give the attribution, and
 none of their data is redistributed here.
 
+## Status
+
+Milestones M0 to M5 are complete: projection, thermal, time and pose, aligned
+frames with the sequence format and `fuse_cli`, three real-data checks, and the
+web viewer. CI builds and tests every push on x64 (GCC, Clang, and GCC with
+AddressSanitizer and UndefinedBehaviorSanitizer) and on arm64 (GCC). Planned work is in [ROADMAP.md](ROADMAP.md).
+
+## Ownership and contributors
+
+This is an independent personal project by Han
+([MetaCortex728](https://github.com/MetaCortex728)). It is not owned by, or
+developed for, any employer, client, university or other organization, and no
+one else currently works on the repository.
+
 ## Project history
 
 Developed from November 2026. Earlier design notes are not published. The
 git history records each step: projection, thermal, time and pose, aligned
 frames and the sequence format, the three real-data checks, and the viewer.
+The work was planned and reviewed by Han with Anthropic's Claude as a coding
+assistant.
 
 ## Roadmap
 
