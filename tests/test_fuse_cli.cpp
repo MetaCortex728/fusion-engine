@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -205,6 +206,37 @@ std::string embedded_json(const std::string& html) {
     return html.substr(a + open.size(), b - a - open.size());
 }
 
+// The page's embedded data with each frame's points file merged in as
+// frames[k][camera]["points"]. Checks that points file k is the call
+// fusionPoints(k, {...}); and holds an entry for each camera of the frame.
+fusion::testing::json::Value load_viewer_data(const std::string& viewer_dir) {
+    namespace json = fusion::testing::json;
+    json::Value data = json::parse(embedded_json(read_text(viewer_dir + "/index.html")));
+    std::vector<json::Value>& frames = data.object.at("frames").array;
+    for (std::size_t k = 0; k < frames.size(); ++k) {
+        CAPTURE(k);
+        const std::string name = frames[k]["points_file"].string;
+        char expected[48];
+        std::snprintf(expected, sizeof(expected), "points/frame_%06zu.js", k);
+        CHECK(name == expected);
+        const std::string js = read_text(viewer_dir + "/" + name);
+        const std::string open = "fusionPoints(" + std::to_string(k) + ",";
+        const std::string close = ");\n";
+        REQUIRE(js.size() > open.size() + close.size());
+        REQUIRE(js.compare(0, open.size(), open) == 0);
+        REQUIRE(js.compare(js.size() - close.size(), close.size(), close) == 0);
+        const json::Value points =
+            json::parse(js.substr(open.size(), js.size() - open.size() - close.size()));
+        for (const char* cam : {"rgb", "thermal"}) {
+            json::Value& c = frames[k].object.at(cam);
+            CHECK_FALSE(c.has("points"));
+            CHECK(points[cam].is_null() == c.is_null());
+            if (!c.is_null()) c.object["points"] = points[cam];
+        }
+    }
+    return data;
+}
+
 // Point indices of the rows of a frame CSV visible in `camera`, in scan order.
 std::vector<std::size_t> visible_points(const std::vector<std::vector<std::string>>& frame,
                                         const std::string& camera) {
@@ -235,7 +267,8 @@ TEST_CASE("fuse_cli --viewer writes a self-contained page whose data matches the
     REQUIRE(fs::is_regular_file(page_path));
     const std::string html = read_text(page_path);
 
-    // Self-contained: no external scripts, styles or URLs.
+    // No external scripts, styles or URLs: the only files the page loads are
+    // its own points scripts and images next to it.
     CHECK(html.find("<script src") == std::string::npos);
     CHECK(html.find("<link") == std::string::npos);
     CHECK(html.find("http://") == std::string::npos);
@@ -243,12 +276,12 @@ TEST_CASE("fuse_cli --viewer writes a self-contained page whose data matches the
     CHECK(html.find("fetch(") == std::string::npos);
     CHECK(html.find("XMLHttpRequest") == std::string::npos);
 
-    const json::Value data = json::parse(embedded_json(html));
-    CHECK(data["format"].number == 1);
+    const json::Value data = load_viewer_data(out + "/viewer");
+    CHECK(data["format"].number == 2);
     CHECK(data["sequence"].string == manifest);
     CHECK(data["cameras"]["rgb"]["width"].number == 640);
     CHECK(data["cameras"]["thermal"]["width"].number == 320);
-    CHECK(data["max_points_per_camera"].number == 3000);
+    CHECK(data["max_points_per_camera"].number == 20000);
     const json::Value& frames = data["frames"];
     REQUIRE(frames.size() == 5);
 
@@ -352,8 +385,7 @@ TEST_CASE("fuse_cli --viewer-max-points subsamples deterministically") {
     REQUIRE(run_cli(quote(manifest) + " --out " + quote(out) + " --viewer --viewer-max-points " +
                         std::to_string(cap),
                     root + "/log.txt") == 0);
-    const std::string html = read_text(out + "/viewer/index.html");
-    const json::Value data = json::parse(embedded_json(html));
+    const json::Value data = load_viewer_data(out + "/viewer");
     CHECK(data["max_points_per_camera"].number == static_cast<double>(cap));
     REQUIRE(data["frames"].size() == 3);
     std::size_t subsampled = 0;
@@ -383,7 +415,7 @@ TEST_CASE("fuse_cli --viewer-max-points subsamples deterministically") {
     REQUIRE(run_cli(quote(manifest) + " --out " + quote(root + "/out2") +
                         " --viewer --viewer-max-points " + std::to_string(cap),
                     root + "/log2.txt") == 0);
-    const json::Value again = json::parse(embedded_json(read_text(root + "/out2/viewer/index.html")));
+    const json::Value again = load_viewer_data(root + "/out2/viewer");
     for (std::size_t k = 0; k < 3; ++k) {
         for (const std::string name : {"rgb", "thermal"}) {
             const auto& a = data["frames"][k][name]["points"]["i"].array;

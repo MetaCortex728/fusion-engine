@@ -1,11 +1,16 @@
 // Static web viewer for a fuse_cli run.
 //
-// ViewerWriter writes <out>/viewer/index.html: one self-contained page (inline
-// CSS and JavaScript, no network requests, no external libraries) with the
-// run's data embedded as JSON in a <script type="application/json"
-// id="fusion-data"> element, so it works when opened from file://. The camera
-// images it shows are written next to it (rgb_NNNNNN.png, thermal_NNNNNN.png,
-// numbered by the camera's image index) and referenced by relative path.
+// ViewerWriter writes <out>/viewer/index.html: a static page (inline CSS and
+// JavaScript, no network requests, no external libraries, works when opened
+// from file://). The run's data, without the per-point arrays, is embedded as
+// JSON in a <script type="application/json" id="fusion-data"> element. The
+// points of the k-th frame are in points/frame_NNNNNN.js (NNNNNN = k), a
+// script that calls fusionPoints(k, {"rgb": {...}, "thermal": {...}}); the
+// page loads it with a <script> element when it shows the frame (no fetch,
+// which file:// pages cannot use), so opening a long run does not parse every
+// frame's points. The camera images are written next to the page
+// (rgb_NNNNNN.png, thermal_NNNNNN.png, numbered by the camera's image index)
+// and referenced by relative path.
 //
 // Timestamps (t_ref_ns, t_match_ns) are embedded as decimal strings, because
 // epoch nanoseconds do not fit exactly in a JavaScript number.
@@ -41,7 +46,7 @@ struct Stats {
 };
 
 /// The default cap on embedded points per camera and frame.
-constexpr std::size_t kDefaultViewerMaxPoints = 3000;
+constexpr std::size_t kDefaultViewerMaxPoints = 20000;
 
 /// Ranks (0-based, among m items) kept by the deterministic subsampling:
 /// all of them when m <= max_points, else floor(k * m / max_points) for
@@ -69,8 +74,11 @@ public:
     std::string index_path() const { return index_path_; }
 
 private:
+    // Writes the camera's entry of the frame to the page and appends its
+    // points to `points_json`.
     void write_camera(const char* key, const std::optional<fusion::CameraFrame>& cam,
-                      const fusion::AlignedFrame& frame, const fusion::RgbImage* image);
+                      const fusion::AlignedFrame& frame, const fusion::RgbImage* image,
+                      std::string& points_json);
 
     std::string dir_;
     std::string index_path_;

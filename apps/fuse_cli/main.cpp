@@ -12,8 +12,9 @@
 //   association_rgb.csv, association_thermal.csv   time association per camera
 //   summary.csv                   one row per frame
 //   summary.json                  latency statistics
-//   viewer/index.html             with --viewer: a self-contained web page
-//                                 (see viewer.hpp), plus the images it shows
+//   viewer/index.html             with --viewer: a static web page (see
+//                                 viewer.hpp), plus its per-frame points
+//                                 scripts (viewer/points/) and images
 //
 // Exit codes: 0 success, 1 a sequence or processing error, 2 bad arguments.
 #include <algorithm>
@@ -55,9 +56,9 @@ const char* kUsage =
     "  --out <dir>              output directory (created if missing)\n"
     "  --frames N               process only the first N LiDAR scans\n"
     "  --overlay                also write PNGs of the depth points over each camera image\n"
-    "  --viewer                 also write viewer/index.html, a self-contained web page\n"
+    "  --viewer                 also write viewer/index.html, a static web page\n"
     "  --viewer-max-points N    embed at most N points per camera and frame in the page\n"
-    "                           (default 3000, deterministic subsampling above that)\n";
+    "                           (default 20000, deterministic subsampling above that)\n";
 
 struct Args {
     std::string manifest;

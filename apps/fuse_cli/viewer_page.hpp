@@ -1,7 +1,8 @@
 // The viewer page around the embedded JSON: kViewerPageHead ends inside the
 // <script type="application/json" id="fusion-data"> element, kViewerPageTail
-// closes it and holds the page's script. Everything is inline; the page makes
-// no network requests and uses no external libraries.
+// closes it and holds the page's script. Everything is inline except the
+// per-frame point scripts (points/frame_NNNNNN.js) and images next to the
+// page; the page makes no network requests and uses no external libraries.
 #pragma once
 
 namespace fuse_cli {
@@ -156,6 +157,28 @@ inline constexpr const char* kViewerPageTail = R"HTML(</script>
   var run = data.run;
   function $(id) { return document.getElementById(id); }
 
+  // Each frame's points are in a sibling script (frame.points_file) that
+  // calls fusionPoints(k, points). It is loaded with a <script> element when
+  // the frame is shown (fetch does not work from file://), and only frames
+  // near the current one are kept.
+  var points = {}, pending = {};
+  window.fusionPoints = function (k, p) { points[k] = p; };
+  function loadPoints(k) {
+    if (k < 0 || k >= frames.length || points[k] || pending[k]) return;
+    pending[k] = true;
+    var s = document.createElement('script');
+    function done() {
+      delete pending[k];
+      if (!points[k]) points[k] = { failed: true };
+      s.remove();
+      if (k === state.frame) draw();
+    }
+    s.onload = done;
+    s.onerror = done;
+    s.src = frames[k].points_file;
+    document.head.appendChild(s);
+  }
+
   // Colour maps. Depth: red (near) through yellow, green and cyan to blue
   // (far), the same as fuse_cli's overlays. Thermal: the hot map from dark red
   // through yellow to white.
@@ -224,8 +247,8 @@ inline constexpr const char* kViewerPageTail = R"HTML(</script>
   }
   function unit() { return state.color === 'depth' ? 'm' : data.thermal_unit; }
 
-  function drawPoints(cam) {
-    var p = cam.points, n = p.u.length, order = [];
+  function drawPoints(p) {
+    var n = p.u.length, order = [];
     for (var i = 0; i < n; i++) if (p.nearest[i] || state.showHidden) order.push(i);
     order.sort(function (a, b) { return p.depth[b] - p.depth[a]; });
     var values = state.color === 'depth' ? p.depth : p.thermal, table = LUT[state.color];
@@ -283,7 +306,10 @@ inline constexpr const char* kViewerPageTail = R"HTML(</script>
       if (img.complete && img.naturalWidth > 0) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       else if (img.failed) { msg.textContent = 'Image ' + cam.image + ' could not be loaded.'; msg.hidden = false; }
     }
-    drawPoints(cam);
+    var fp = points[state.frame];
+    if (!fp) { loadPoints(state.frame); return; }  // drawn again once loaded
+    if (fp.failed) { msg.textContent = 'Points file ' + f.points_file + ' could not be loaded.'; msg.hidden = false; return; }
+    drawPoints(fp[state.camera]);
   }
 
   function updateLegend() {
@@ -337,6 +363,10 @@ inline constexpr const char* kViewerPageTail = R"HTML(</script>
 
   function setFrame(i) {
     state.frame = Math.max(0, Math.min(frames.length - 1, i));
+    Object.keys(points).forEach(function (k) { if (Math.abs(k - state.frame) > 2) delete points[k]; });
+    loadPoints(state.frame);
+    loadPoints(state.frame + 1);
+    loadPoints(state.frame - 1);
     updatePanel();
     draw();
   }

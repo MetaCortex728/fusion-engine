@@ -68,6 +68,13 @@ std::string image_name(const char* prefix, std::size_t index) {
     return buf;
 }
 
+// Points file of the k-th frame of the page, relative to the page.
+std::string points_file_name(std::size_t k) {
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "points/frame_%06zu.js", k);
+    return buf;
+}
+
 std::string array(const std::vector<double>& v) {
     std::string s = "[";
     for (std::size_t i = 0; i < v.size(); ++i) {
@@ -117,8 +124,8 @@ ViewerWriter::ViewerWriter(const std::string& out_dir, const fusion::Sequence& s
       thermal_hi_(-std::numeric_limits<double>::infinity()) {
     if (max_points_ == 0) throw std::invalid_argument("viewer: max_points must be positive");
     std::error_code ec;
-    fs::create_directories(dir_, ec);
-    if (ec || !fs::is_directory(dir_)) {
+    fs::create_directories(fs::path(dir_) / "points", ec);
+    if (ec || !fs::is_directory(fs::path(dir_) / "points")) {
         throw std::runtime_error("cannot create viewer directory " + dir_);
     }
     out_.open(index_path_, std::ios::binary);
@@ -126,7 +133,7 @@ ViewerWriter::ViewerWriter(const std::string& out_dir, const fusion::Sequence& s
     thermal_celsius_ = seq.thermal && seq.thermal->config.thermal.has_value();
 
     out_ << kViewerPageHead;
-    out_ << "{\"format\":1,\"sequence\":" << json_string(manifest) << ",\"cameras\":{";
+    out_ << "{\"format\":2,\"sequence\":" << json_string(manifest) << ",\"cameras\":{";
     bool first = true;
     for (const auto& [key, stream] : {std::pair{"rgb", &seq.rgb}, {"thermal", &seq.thermal}}) {
         if (!*stream) continue;
@@ -140,11 +147,13 @@ ViewerWriter::ViewerWriter(const std::string& out_dir, const fusion::Sequence& s
 }
 
 void ViewerWriter::write_camera(const char* key, const std::optional<fusion::CameraFrame>& cam,
-                                const fusion::AlignedFrame& frame,
-                                const fusion::RgbImage* image) {
+                                const fusion::AlignedFrame& frame, const fusion::RgbImage* image,
+                                std::string& points_json) {
     out_ << ",\"" << key << "\":";
+    points_json += std::string(points_json.empty() ? "{" : ",") + '"' + key + "\":";
     if (!cam) {
         out_ << "null";
+        points_json += "null";
         return;
     }
     const fusion::Association& a = cam->association;
@@ -213,9 +222,9 @@ void ViewerWriter::write_camera(const char* key, const std::optional<fusion::Cam
          << ",\"projected\":" << cam->projected_count << ",\"hidden\":" << hidden
          << ",\"embedded\":" << ranks.size()
          << ",\"subsampled\":" << (ranks.size() < visible.size() ? "true" : "false")
-         << ",\"image\":" << image_ref << ",\"points\":{\"i\":[" << idx << "],\"u\":[" << u
-         << "],\"v\":[" << v << "],\"depth\":[" << depth << "],\"nearest\":[" << nearest
-         << "],\"thermal\":[" << thermal << "]}}";
+         << ",\"image\":" << image_ref << '}';
+    points_json += "{\"i\":[" + idx + "],\"u\":[" + u + "],\"v\":[" + v + "],\"depth\":[" + depth +
+                   "],\"nearest\":[" + nearest + "],\"thermal\":[" + thermal + "]}";
 }
 
 void ViewerWriter::add_frame(std::size_t index, const fusion::AlignedFrame& frame,
@@ -223,11 +232,22 @@ void ViewerWriter::add_frame(std::size_t index, const fusion::AlignedFrame& fram
                              const fusion::RgbImage* thermal_display) {
     // Times as strings: epoch nanoseconds exceed the 2^53 integers a
     // JavaScript number holds exactly.
+    const std::string points_name = points_file_name(frames_);
     out_ << (frames_ ? ",\n" : "") << "{\"index\":" << index << ",\"t_ref_ns\":\""
-         << frame.t_ref_ns << "\",\"points\":" << frame.points.size();
-    write_camera("rgb", frame.rgb, frame, rgb);
-    write_camera("thermal", frame.thermal, frame, thermal_display);
+         << frame.t_ref_ns << "\",\"points\":" << frame.points.size()
+         << ",\"points_file\":" << json_string(points_name);
+    std::string points_json;
+    write_camera("rgb", frame.rgb, frame, rgb, points_json);
+    write_camera("thermal", frame.thermal, frame, thermal_display, points_json);
     out_ << '}';
+
+    // The frame's points, as a script the page loads with a <script> element
+    // when it shows the frame. The JSON holds only keys, numbers and null.
+    const std::string points_path = (fs::path(dir_) / points_name).string();
+    std::ofstream js(points_path, std::ios::binary);
+    js << "fusionPoints(" << frames_ << "," << points_json << "});\n";
+    js.close();
+    if (!js) throw std::runtime_error("cannot write " + points_path);
     ++frames_;
     if (!out_) throw std::runtime_error("cannot write " + index_path_);
 }
