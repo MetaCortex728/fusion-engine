@@ -1,6 +1,7 @@
 // fuse_cli: runs the fusion engine over a whole sequence.
 //
-//   fuse_cli <sequence.yaml> --out <dir> [--frames N] [--overlay]
+//   fuse_cli <sequence.yaml> --out <dir> [--frames N] [--overlay] [--viewer]
+//            [--viewer-max-points N]
 //
 // For every LiDAR scan (the reference) it builds an AlignedFrame and writes
 //   frame_NNNNNN.csv              per-point output (write_aligned_frame_csv)
@@ -11,6 +12,8 @@
 //   association_rgb.csv, association_thermal.csv   time association per camera
 //   summary.csv                   one row per frame
 //   summary.json                  latency statistics
+//   viewer/index.html             with --viewer: a self-contained web page
+//                                 (see viewer.hpp), plus the images it shows
 //
 // Exit codes: 0 success, 1 a sequence or processing error, 2 bad arguments.
 #include <algorithm>
@@ -37,6 +40,8 @@
 #include <fusion/thermal.hpp>
 #include <fusion/time.hpp>
 
+#include "viewer.hpp"
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -44,17 +49,23 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 const char* kUsage =
-    "usage: fuse_cli <sequence.yaml> --out <dir> [--frames N] [--overlay]\n"
+    "usage: fuse_cli <sequence.yaml> --out <dir> [--frames N] [--overlay] [--viewer]\n"
+    "                [--viewer-max-points N]\n"
     "\n"
-    "  --out <dir>    output directory (created if missing)\n"
-    "  --frames N     process only the first N LiDAR scans\n"
-    "  --overlay      also write PNGs of the depth points over each camera image\n";
+    "  --out <dir>              output directory (created if missing)\n"
+    "  --frames N               process only the first N LiDAR scans\n"
+    "  --overlay                also write PNGs of the depth points over each camera image\n"
+    "  --viewer                 also write viewer/index.html, a self-contained web page\n"
+    "  --viewer-max-points N    embed at most N points per camera and frame in the page\n"
+    "                           (default 3000, deterministic subsampling above that)\n";
 
 struct Args {
     std::string manifest;
     std::string out_dir;
     std::optional<std::size_t> frames;
     bool overlay = false;
+    bool viewer = false;
+    std::size_t viewer_max_points = fuse_cli::kDefaultViewerMaxPoints;
 };
 
 struct UsageError {
@@ -62,6 +73,15 @@ struct UsageError {
 };
 
 struct HelpRequested {};
+
+std::size_t positive(const std::string& option, const std::string& v) {
+    std::size_t n = 0;
+    const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), n);
+    if (ec != std::errc() || ptr != v.data() + v.size() || n == 0) {
+        throw UsageError{option + " needs a positive integer, got '" + v + "'"};
+    }
+    return n;
+}
 
 Args parse_args(int argc, char** argv) {
     Args a;
@@ -74,15 +94,14 @@ Args parse_args(int argc, char** argv) {
             a.out_dir = argv[i];
         } else if (arg == "--frames") {
             if (++i >= argc) throw UsageError{"--frames needs a number"};
-            const std::string v = argv[i];
-            std::size_t n = 0;
-            const auto [ptr, ec] = std::from_chars(v.data(), v.data() + v.size(), n);
-            if (ec != std::errc() || ptr != v.data() + v.size() || n == 0) {
-                throw UsageError{"--frames needs a positive integer, got '" + v + "'"};
-            }
-            a.frames = n;
+            a.frames = positive("--frames", argv[i]);
         } else if (arg == "--overlay") {
             a.overlay = true;
+        } else if (arg == "--viewer") {
+            a.viewer = true;
+        } else if (arg == "--viewer-max-points") {
+            if (++i >= argc) throw UsageError{"--viewer-max-points needs a number"};
+            a.viewer_max_points = positive("--viewer-max-points", argv[i]);
         } else if (!arg.empty() && arg[0] == '-') {
             throw UsageError{"unknown option " + arg};
         } else if (a.manifest.empty()) {
@@ -114,10 +133,7 @@ std::string frame_name(const std::string& prefix, std::size_t i, const std::stri
 
 // Median (mean of the two middle values for an even count) and p95 by the
 // nearest-rank method: the ceil(0.95 n)-th smallest value.
-struct Stats {
-    double median = 0.0;
-    double p95 = 0.0;
-};
+using fuse_cli::Stats;
 
 Stats stats(std::vector<double> v) {
     Stats s;
@@ -292,11 +308,14 @@ int run(const Args& args) {
     }
 
     const std::size_t n = std::min(seq.lidar.size(), args.frames.value_or(seq.lidar.size()));
+    std::optional<fuse_cli::ViewerWriter> viewer;
+    if (args.viewer) viewer.emplace(args.out_dir, seq, args.manifest, args.viewer_max_points);
+
     std::vector<FrameRow> rows;
     std::size_t uncompensated = 0;
     for (std::size_t i = 0; i < n; ++i) {
         // Reading: the scan, the thermal image (needed for raw values) and,
-        // for overlays, the RGB image.
+        // for overlays and the viewer, the RGB image.
         auto t0 = Clock::now();
         const fusion::LidarScan scan = fusion::load_lidar_scan(seq, i);
         std::optional<fusion::RawThermalImage> thermal_img;
@@ -305,7 +324,7 @@ int run(const Args& args) {
             thermal_img = fusion::read_thermal_frame(
                 seq.thermal->frames[thermal_assoc[i].match_index].path, seq.thermal->config);
         }
-        if (args.overlay && seq.rgb && rgb_assoc[i].accepted) {
+        if ((args.overlay || args.viewer) && seq.rgb && rgb_assoc[i].accepted) {
             rgb_img = fusion::read_rgb_frame(seq.rgb->frames[rgb_assoc[i].match_index].path,
                                              seq.rgb->config);
         }
@@ -329,15 +348,24 @@ int run(const Args& args) {
         // Writing.
         t0 = Clock::now();
         fusion::write_aligned_frame_csv(out_path(frame_name("frame_", i, ".csv")), frame);
+        std::optional<fusion::RgbImage> thermal_display;
+        if ((args.overlay || args.viewer) && thermal_img) {
+            thermal_display = render_thermal(*thermal_img, seq.thermal->config);
+        }
+        if (viewer) {
+            // Before the overlays, which draw into the images.
+            viewer->add_frame(i, frame, rgb_img ? &*rgb_img : nullptr,
+                              thermal_display ? &*thermal_display : nullptr);
+        }
         if (args.overlay) {
             if (rgb_img && frame.rgb && frame.rgb->depth) {
                 draw_depth(*rgb_img, *frame.rgb->depth);
                 fusion::write_rgb_png(out_path(frame_name("overlay_rgb_", i, ".png")), *rgb_img);
             }
-            if (thermal_img && frame.thermal && frame.thermal->depth) {
-                fusion::RgbImage img = render_thermal(*thermal_img, seq.thermal->config);
-                draw_depth(img, *frame.thermal->depth);
-                fusion::write_rgb_png(out_path(frame_name("overlay_thermal_", i, ".png")), img);
+            if (thermal_display && frame.thermal && frame.thermal->depth) {
+                draw_depth(*thermal_display, *frame.thermal->depth);
+                fusion::write_rgb_png(out_path(frame_name("overlay_thermal_", i, ".png")),
+                                      *thermal_display);
             }
         }
         row.write_ms = ms_since(t0);
@@ -367,6 +395,7 @@ int run(const Args& args) {
     const Stats rs = stats(read), ps = stats(process), ws = stats(write);
     write_summary_csv(out_path("summary.csv"), rows);
     write_summary_json(out_path("summary.json"), args.manifest, rows, rs, ps, ws);
+    if (viewer) viewer->finish(read, process, write, rs, ps, ws);
 
     std::cout << "fuse_cli: " << rows.size() << " frames from " << args.manifest << " -> "
               << args.out_dir << "\n"
@@ -374,6 +403,7 @@ int run(const Args& args) {
               << num(ps.p95) << " ms\n"
               << "  reading:                         median " << num(rs.median) << " ms, p95 "
               << num(rs.p95) << " ms\n";
+    if (viewer) std::cout << "  viewer: " << viewer->index_path() << "\n";
     if (uncompensated > 0) {
         std::cout << "  note: " << uncompensated
                   << " accepted camera images were projected without motion compensation "

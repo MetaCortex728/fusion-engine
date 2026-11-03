@@ -1,4 +1,4 @@
-add_executable(fuse_cli fuse_cli/main.cpp)
+add_executable(fuse_cli fuse_cli/main.cpp fuse_cli/viewer.cpp)
 target_link_libraries(fuse_cli PRIVATE fusion::io fusion_options)
 
 add_executable(thermal_export thermal_export/main.cpp)
