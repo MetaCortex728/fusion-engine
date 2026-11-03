@@ -182,6 +182,8 @@ Rigid3 MovingBody::T_world_body(std::int64_t t_ns) const {
 
 Rigid3 MovingRig::T_camera_lidar() const { return T_body_camera.inverse() * T_body_lidar; }
 
+Rigid3 MovingRig::T_thermal_lidar() const { return T_body_thermal.inverse() * T_body_lidar; }
+
 LidarConfig MovingRig::lidar_at(std::int64_t t_ns) const {
     LidarConfig c = lidar;
     c.T_world_lidar = body.T_world_body(t_ns) * T_body_lidar;
@@ -192,6 +194,13 @@ PinholeCamera MovingRig::camera_at(std::int64_t t_ns) const {
     PinholeCamera cam;
     cam.K = camera_K;
     cam.T_world_camera = body.T_world_body(t_ns) * T_body_camera;
+    return cam;
+}
+
+PinholeCamera MovingRig::thermal_at(std::int64_t t_ns) const {
+    PinholeCamera cam;
+    cam.K = thermal_K;
+    cam.T_world_camera = body.T_world_body(t_ns) * T_body_thermal;
     return cam;
 }
 
@@ -206,7 +215,10 @@ MovingRig make_moving_rig() {
     rig.T_body_camera = make_rigid(R_body_optical(), {0.2, 0.1, 1.2});
     rig.lidar = make_reference_lidar();
     rig.lidar.T_world_lidar = Rigid3::Identity();
+    rig.T_body_thermal =
+        make_rigid(rot_rpy(0.0, deg(2.0), deg(3.0)) * R_body_optical(), {0.2, -0.15, 1.25});
     rig.camera_K = make_rgb_camera().K;
+    rig.thermal_K = make_thermal_camera().K;
     rig.t_lidar_ns = rig.body.t0_ns + 107'000'000;
     rig.t_camera_ns = rig.t_lidar_ns + 33'000'000;
     return rig;

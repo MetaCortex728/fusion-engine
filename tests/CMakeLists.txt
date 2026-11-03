@@ -12,6 +12,15 @@ target_link_libraries(fusion_test_support
     PUBLIC Eigen3::Eigen
     PRIVATE fusion_options)
 
+# Synthetic sequence in the on-disk sequence format, and a tool that writes it.
+add_library(fusion_test_sequence STATIC support/synthetic_sequence.cpp)
+target_link_libraries(fusion_test_sequence
+    PUBLIC fusion_test_support fusion::io
+    PRIVATE fusion_options)
+
+add_executable(make_synthetic_sequence tools/make_synthetic_sequence.cpp)
+target_link_libraries(make_synthetic_sequence PRIVATE fusion_test_sequence fusion_options)
+
 add_executable(fusion_tests
     main.cpp
     test_version.cpp
@@ -24,9 +33,18 @@ add_executable(fusion_tests
     test_thermal_projection.cpp
     test_time.cpp
     test_pose.cpp
-    test_lidar_compensation.cpp)
+    test_lidar_compensation.cpp
+    test_aligned_frame.cpp
+    test_sequence.cpp)
 target_link_libraries(fusion_tests PRIVATE
-    fusion::fusion fusion_test_support doctest fusion_options)
+    fusion::fusion fusion::io fusion_test_support fusion_test_sequence doctest fusion_options)
+
+# End-to-end test of fuse_cli, which it runs as a separate process.
+if(TARGET fuse_cli)
+    target_sources(fusion_tests PRIVATE test_fuse_cli.cpp)
+    target_compile_definitions(fusion_tests PRIVATE FUSE_CLI_PATH="$<TARGET_FILE:fuse_cli>")
+    add_dependencies(fusion_tests fuse_cli)
+endif()
 
 target_compile_definitions(fusion_tests PRIVATE
     FUSION_EXPECTED_VERSION="${PROJECT_VERSION}"

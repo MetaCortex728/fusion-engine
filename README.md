@@ -5,8 +5,10 @@
 > map, convert raw thermal counts to degrees Celsius, render them for display,
 > and project LiDAR points into a thermal camera. It can associate sensor
 > timestamps, interpolate a body trajectory, and move a whole LiDAR scan to a
-> camera's capture time. Aligned frames and dataset adapters do not exist
-> yet. There is no release.
+> camera's capture time. It builds an aligned frame per LiDAR scan, reads
+> sequences in its own [on-disk format](docs/sequence-format.md), and
+> `fuse_cli` runs a whole sequence. It has been run only on synthetic data so
+> far. No dataset adapters exist yet, and there is no release.
 
 ## What it does
 
@@ -24,14 +26,19 @@ multi-sensor alignment without pulling in ROS or a large dependency tree.
 - C++17
 - [Eigen](https://eigen.tuxfamily.org/) for linear algebra
 - [yaml-cpp](https://github.com/jbeder/yaml-cpp) for configuration files
+- [LodePNG](https://github.com/lvandeve/lodepng) (zlib licence, vendored) for
+  PNG images, in the `fusion_io` library only
 
-No ROS dependency.
+No ROS dependency. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for
+the vendored code.
 
 ## Design rules
 
-- Dependencies stay minimal: Eigen and yaml-cpp, both found on the system
-  and never vendored. Eigen types appear in the public headers; yaml-cpp is
-  used only inside the config loader.
+- Dependencies stay minimal. The core library (`fusion`) needs only Eigen
+  and yaml-cpp, both found on the system and never vendored. Eigen types
+  appear in the public headers, and yaml-cpp is used only inside the config
+  loader. The sequence I/O library (`fusion_io`) adds the vendored LodePNG
+  for PNG images. Nothing else is vendored except doctest for the tests.
 - No x86-only intrinsics, so the code stays portable to embedded targets.
 - Time is represented as integer nanoseconds.
 - Transforms are named `T_target_source`: the transform that maps a point
@@ -56,6 +63,9 @@ sudo apt-get install cmake ninja-build g++ clang libeigen3-dev libyaml-cpp-dev
 | `fusion/time.hpp`        | Times are `int64_t` nanoseconds (`TimeNs`). `to_reference_time()` applies a sensor's `time_offset_ns` (`t_reference = t_sensor + time_offset_ns`). `associate()` pairs each reference time (the LiDAR's, by default) with the other sensor's nearest measurement, takes the earlier one on an exact tie, and accepts it only if `|t_j - t_ref| <= tau`. An overload takes sensor-clock stamps plus both offsets. Every reference time gets a result, rejected ones included, with `delta_t_ns = t_match_ns - t_ref_ns`. `default_tau_ns()` gives half the slower sensor's period. `write_association_csv()` writes `t_ref_ns,t_match_ns,delta_t_ns,accepted`. |
 | `fusion/pose.hpp`        | `StampedPose` (time, `Eigen::Vector3d` position, `Eigen::Quaterniond` orientation) and `Trajectory`, which holds poses with strictly increasing times and rejects unsorted or duplicate times. `interpolate(t)` and `T_world_body(t)` use `alpha = (t - t_i) / (t_{i+1} - t_i)`, linear position, and slerp along the shortest arc (`slerp_shortest()`). Times outside the trajectory throw `std::out_of_range`; there is no extrapolation. |
 | `fusion/lidar.hpp`       | Scan-level motion compensation. `compensate_scan()` moves a scan taken at `t_l` to a camera time `t_c`: `p_L(t_c) = T_body_lidar^-1 * T_world_body(t_c)^-1 * T_world_body(t_l) * T_body_lidar * p_L`. The points stay in the LiDAR frame, so projection with `T_camera_lidar` applies unchanged. `scan_motion_transform()` returns that transform. |
+| `fusion/aligned_frame.hpp` | `build_aligned_frame()` builds the fused result for one LiDAR scan at `t_l`. For each camera input (RGB, thermal; each optional) it takes the `Association` for `t_l` and records its `delta_t_ns` and `accepted` flag. For an accepted camera, the scan is compensated to the camera's time when a trajectory covers both times (`compensated` says whether it was), then projected with `project_point()` into a `SparseDepthMap`. Per point and camera, the frame holds the pixel and depth, or "not visible", whether the point is the nearest at its pixel, and for thermal the raw count. The frame copies everything it needs; inputs are only read. `write_aligned_frame_csv()` writes the per-point output. |
+| `fusion/sequence.hpp`    | `fusion_io` library. Reads the [sequence format](docs/sequence-format.md): `load_sequence()` validates the manifest, camera configs, list files and trajectory, and checks that every listed file exists. It also provides readers for LiDAR `.bin` scans, RGB and thermal frames (with an image size check against the config) and the trajectory CSV, plus writers for adapters. `associate_camera()` and `camera_tau_ns()` associate a camera's frames with the scans. Problems throw `SequenceError` naming the file (and line). |
+| `fusion/image_io.hpp`    | `fusion_io` library. 8-bit RGB PNG and 16-bit greyscale thermal PNG reading and writing via LodePNG. Raw thermal counts round-trip bit-exactly. |
 | `fusion/thermal.hpp`     | `RawThermalImage` holds raw `uint16_t` counts unchanged. `raw_to_celsius()` applies `T = B / ln(R / (S - O) + F) - 273.15` and throws `std::domain_error` when the result is undefined: S equal to O, a logarithm argument that is not positive or equals 1, or a result at or below absolute zero. `window_level()` computes `clamp((T - (L - W / 2)) / W, 0, 1)` and rejects W <= 0. `hot_colormap()` maps that value to 8-bit RGB, black through red and yellow to white. `render_display()` builds a separate display image and only reads the raw image. `project_to_thermal()` projects LiDAR points with `project_point()`. It returns the thermal `SparseDepthMap` and, for every projected point, its pixel, its depth, and the raw count at that pixel. |
 
 Conventions: pixel centres sit at integer coordinates, so the image spans
@@ -115,6 +125,45 @@ for (const auto& m : matches) {
 }
 ```
 
+### Run `fuse_cli` on the synthetic sequence
+
+`fuse_cli` runs every LiDAR scan of a sequence through the engine:
+
+```sh
+fuse_cli <sequence.yaml> --out <dir> [--frames N] [--overlay]
+```
+
+No dataset is needed to try it. The test build includes
+`make_synthetic_sequence`, which writes a five-scan sequence (LiDAR, RGB,
+thermal, trajectory) rendered from the synthetic test scene:
+
+```sh
+cmake --preset default && cmake --build --preset default
+build/default/tests/make_synthetic_sequence out/synthetic
+build/default/apps/fuse_cli out/synthetic/sequence.yaml --out out/fused --overlay
+```
+
+It writes to `out/fused`:
+
+| File | Contents |
+|------|----------|
+| `frame_NNNNNN.csv` | one row per scan point: `point,x,y,z,intensity`, then per camera `u,v,depth,nearest` (thermal adds `raw`); empty when the point is not visible or the image was rejected |
+| `overlay_rgb_NNNNNN.png`, `overlay_thermal_NNNNNN.png` | with `--overlay`: depth points (red near, blue far) drawn over the RGB image and over the thermal image rendered with the hot colormap |
+| `summary.csv` | one row per frame: per camera the matched image index and time, `delta_t_ns`, `accepted`, `compensated`, number of projected points; then `read_ms`, `process_ms`, `write_ms` |
+| `summary.json` | median and p95 of `process_ms`, `read_ms` and `write_ms` |
+| `association_rgb.csv`, `association_thermal.csv` | the time association per camera (`write_association_csv()`) |
+
+Processing time is measured with `std::chrono::steady_clock` around
+`build_aligned_frame()` only. That covers compensation, projection and the
+z-buffer, but not file reading (`read_ms`) or output writing (`write_ms`).
+The median and p95 (nearest rank) are printed at the end. On the synthetic
+sequence (about 6,000 points per scan) a `default` build took about 1 ms per
+frame on one development machine. Treat that as an example run, not a
+benchmark.
+
+Exit codes: 0 on success, 1 for a sequence or processing error (the message
+names the file), 2 for bad arguments.
+
 ### Build and test
 
 Each preset builds into `build/<preset>`:
@@ -152,8 +201,8 @@ LiDAR point reads its surface's raw value. Points within 2 pixels of a
 surface boundary in the rendered image are left out of that check.
 
 The scene also has a moving rig (`make_moving_rig()`): a body moving at a
-constant 8 m/s with a constant 0.6 rad/s yaw rate, carrying a LiDAR and the
-RGB camera, both rigidly mounted. The LiDAR takes an instantaneous scan at
+constant 8 m/s with a constant 0.6 rad/s yaw rate, carrying a LiDAR, the
+RGB camera and the thermal camera, all rigidly mounted. The LiDAR takes an instantaneous scan at
 `t_l`, and the camera captures at `t_c = t_l + 33 ms`. Ground truth is the
 scene ray-cast from the camera's true pose at `t_c`. The compensation test
 samples the body's trajectory every 40 ms, compensates the scan to `t_c`, and
@@ -165,12 +214,35 @@ compensation, none of the 493 box points agree and the median depth error
 is 0.26 m on box points and 0.25 m over all points. Ground points are
 less affected because the planar motion keeps the ground plane in place.
 
+`tests/support/synthetic_sequence.hpp` turns the moving rig into a sequence:
+five 10 Hz scans, 20 Hz RGB images, 10 Hz thermal images with one frame
+dropped, sensor clock offsets, and the trajectory sampled every 40 ms. Scan 0
+has no RGB image within its 25 ms `tau_ns`, and scan 3 has no thermal image
+within the default 50 ms, so both rejection paths are exercised. The tests
+check that:
+
+- every reader returns the generator's values exactly (float32 points,
+  bit-exact raw thermal counts and RGB pixels, trajectory poses);
+- the association flags and `delta_t`s match a brute-force search;
+- the aligned frames built from the in-memory (double-precision) scans agree
+  with the ray-cast depth of each camera at its true pose at the image's time.
+  In each of the 8 accepted camera images, at least 96% of the projected
+  points (the lowest is 810 of 838) agree within 1e-9 relative depth, with a
+  median error below 2e-15 m, and no point lands where the camera sees
+  farther. 2943 visible thermal points away from surface edges read their
+  surface's raw value;
+- built from the files, the same points agree within 1e-5 relative depth,
+  with a median error of about 2e-7 m. That limit comes from float32
+  storage of the points;
+- each malformed input gives its own error, and `fuse_cli` runs end to end
+  with a summary that matches the per-frame CSVs.
+
 ### Roadmap
 
 - Per-point deskew: moving each LiDAR point by its own capture time within
   the sweep. This needs per-point timestamps, which MS2 does not provide, so
   only scan-level compensation exists for now.
-- Aligned frames and dataset adapters.
+- Dataset adapters that convert into the [sequence format](docs/sequence-format.md).
 
 ### Development container
 

@@ -124,30 +124,38 @@ struct MovingBody {
     Rigid3 T_world_body(std::int64_t t_ns) const;
 };
 
-// A moving body carrying a LiDAR and the RGB camera, both rigidly mounted.
-// The LiDAR takes an instantaneous scan at t_lidar_ns; the camera captures
-// 33 ms later, at t_camera_ns.
+// A moving body carrying a LiDAR, the RGB camera and the thermal camera, all
+// rigidly mounted. The LiDAR takes an instantaneous scan at t_lidar_ns; the
+// RGB camera captures 33 ms later, at t_camera_ns.
 struct MovingRig {
     MovingBody body;
     Rigid3 T_body_lidar = Rigid3::Identity();
     Rigid3 T_body_camera = Rigid3::Identity();
+    Rigid3 T_body_thermal = Rigid3::Identity();
     LidarConfig lidar;          // beams and ranges; its pose is set by lidar_at()
     PinholeIntrinsics camera_K;
+    PinholeIntrinsics thermal_K;
     std::int64_t t_lidar_ns = 0;
     std::int64_t t_camera_ns = 0;
 
     // T_camera_lidar from the mounting: T_body_camera^-1 * T_body_lidar.
     Rigid3 T_camera_lidar() const;
+    // T_thermal_lidar from the mounting: T_body_thermal^-1 * T_body_lidar.
+    Rigid3 T_thermal_lidar() const;
     // The LiDAR config posed at the body's true pose at t_ns.
     LidarConfig lidar_at(std::int64_t t_ns) const;
-    // The camera at the body's true pose at t_ns.
+    // The RGB camera at the body's true pose at t_ns.
     PinholeCamera camera_at(std::int64_t t_ns) const;
+    // The thermal camera at the body's true pose at t_ns.
+    PinholeCamera thermal_at(std::int64_t t_ns) const;
 };
 
 // Body at (-1, 0, 0) with yaw 0.02 rad at t0 = 2 s, moving at 8 m/s (world
 // velocity (8, 0.3, 0)) and yawing at 0.6 rad/s. The reference LiDAR beams
 // sit 1.8 m above the body origin, slightly tilted; the RGB camera's
-// intrinsics sit at (0.2, 0.1, 1.2) looking along body +x. The scan is at
+// intrinsics sit at (0.2, 0.1, 1.2) looking along body +x. The thermal
+// camera, with the thermal intrinsics, sits at (0.2, -0.15, 1.25), yawed
+// 3 degrees and pitched 2 degrees down. The scan is at
 // t_lidar_ns = t0 + 107 ms and the camera captures at t_lidar_ns + 33 ms.
 MovingRig make_moving_rig();
 
