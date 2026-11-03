@@ -127,15 +127,14 @@ cmake --preset default && cmake --build --preset default && ctest --preset defau
 |-----------|----------|-----------------------------------------|
 | `default` | GCC      | RelWithDebInfo                          |
 | `clang`   | Clang    | RelWithDebInfo                          |
-| `asan`    | Clang    | Debug with AddressSanitizer and UBSan   |
+| `asan`    | GCC      | Debug with AddressSanitizer and UBSan   |
 
 The `ci-default`, `ci-clang`, and `ci-asan` presets do the same but treat
 warnings as errors.
 
-In some environments, binaries built with Clang 14 ASan sometimes segfault at
-startup, before any test runs. This was seen on WSL2 with a 6.18 kernel, where
-an empty ASan program crashes the same way. If `asan` or `ci-asan` fails with
-`SEGFAULT` and prints no doctest output, rerun it.
+The ASan presets use GCC because Clang 14's ASan runtime crashes at startup
+in about one run in four under newer kernels with larger address-space
+randomization (seen on WSL2 with a 6.18 kernel), while GCC 11's does not.
 
 ### Synthetic test scene
 

@@ -35,8 +35,8 @@
     },
     {
       "name": "asan",
-      "displayName": "Clang with ASan and UBSan",
-      "inherits": "clang",
+      "displayName": "GCC with ASan and UBSan",
+      "inherits": "default",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "FUSION_SANITIZE": "ON"
@@ -44,7 +44,7 @@
     },
     { "name": "ci-default", "displayName": "CI: GCC", "inherits": ["ci", "default"] },
     { "name": "ci-clang", "displayName": "CI: Clang", "inherits": ["ci", "clang"] },
-    { "name": "ci-asan", "displayName": "CI: ASan and UBSan", "inherits": ["ci", "asan"] }
+    { "name": "ci-asan", "displayName": "CI: GCC with ASan and UBSan", "inherits": ["ci", "asan"] }
   ],
   "buildPresets": [
     { "name": "default", "configurePreset": "default" },
