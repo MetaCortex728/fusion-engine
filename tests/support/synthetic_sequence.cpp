@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -21,7 +22,6 @@ namespace fs = std::filesystem;
 
 constexpr std::int64_t kMs = 1'000'000;
 constexpr double kMaxDistance = 100.0;
-constexpr std::uint16_t kThermalBackground = 8000;
 
 std::string num(double v) {
     char buf[64];
@@ -122,7 +122,11 @@ std::string config_yaml(const fusion::SensorConfig& c) {
       << "  rotation: " << matrix_yaml(c.T_sensor_source.linear()) << "\n"
       << "  translation: " << vector_yaml(c.T_sensor_source.translation()) << "\n"
       << "time_offset_ns: " << c.time_offset_ns << "\n";
-    if (c.thermal) {
+    if (c.thermal && c.thermal->encoding == fusion::ThermalEncoding::linear) {
+        const fusion::LinearParams& p = c.thermal->linear;
+        y << "thermal:\n  encoding: linear\n  linear: {scale: " << num(p.scale)
+          << ", offset: " << num(p.offset) << "}\n";
+    } else if (c.thermal) {
         const fusion::PlanckParams& p = c.thermal->planck;
         y << "thermal:\n  planck: {R: " << num(p.R) << ", B: " << num(p.B) << ", F: " << num(p.F)
           << ", O: " << num(p.O) << "}\n";
@@ -132,6 +136,20 @@ std::string config_yaml(const fusion::SensorConfig& c) {
 
 }  // namespace
 
+std::uint16_t celsius_to_raw(double celsius, const fusion::PlanckParams& p) {
+    fusion::validate(p);
+    const double kelvin = celsius + 273.15;
+    const double d = std::exp(p.B / kelvin) - p.F;
+    if (!(kelvin > 0.0) || !(d > 0.0)) {
+        throw std::domain_error("celsius_to_raw: exp(B / T) - F is not positive");
+    }
+    const double s = std::round(p.R / d + p.O);
+    if (!(s >= 0.0 && s <= 65535.0)) {
+        throw std::domain_error("celsius_to_raw: raw count outside [0, 65535]");
+    }
+    return static_cast<std::uint16_t>(s);
+}
+
 SyntheticSequence make_synthetic_sequence(int scans) {
     if (scans < 1 || scans > 5) {
         throw std::invalid_argument("make_synthetic_sequence: scans must be in [1, 5]");
@@ -139,6 +157,11 @@ SyntheticSequence make_synthetic_sequence(int scans) {
     const auto n = static_cast<std::size_t>(scans);
     SyntheticSequence s;
     s.scene = Scene::reference();
+    static_assert(std::size(kSyntheticSurfaceCelsius) == 5, "ground and four boxes");
+    for (int surface = 0; surface < static_cast<int>(std::size(kSyntheticSurfaceCelsius)); ++surface) {
+        s.scene.set_raw(surface, celsius_to_raw(kSyntheticSurfaceCelsius[surface], kSyntheticPlanck));
+    }
+    const std::uint16_t sky_raw = celsius_to_raw(kSyntheticSkyCelsius, kSyntheticPlanck);
     s.rig = make_moving_rig();
     const MovingRig& rig = s.rig;
 
@@ -165,7 +188,7 @@ SyntheticSequence make_synthetic_sequence(int scans) {
     // Cameras.
     s.rgb.config = camera_config("rgb", rig.camera_K, rig.T_camera_lidar(), -2 * kMs);
     s.thermal.config = camera_config("thermal", rig.thermal_K, rig.T_thermal_lidar(), 5 * kMs);
-    s.thermal.config.thermal = fusion::ThermalCalibration{{380747.0, 1428.0, 1.0, -88.539}};
+    s.thermal.config.thermal = fusion::ThermalCalibration::from_planck(kSyntheticPlanck);
     for (std::size_t j = 0; j < 2 * n; ++j) {
         s.rgb.stamps_ref_ns.push_back(t_l[0] + 33 * kMs + 50 * kMs * static_cast<std::int64_t>(j));
     }
@@ -188,7 +211,7 @@ SyntheticSequence make_synthetic_sequence(int scans) {
     for (std::int64_t t : s.thermal.stamps_ref_ns) {
         const PinholeCamera cam = rig.thermal_at(t);
         s.thermal_images.emplace_back(cam.K.width, cam.K.height,
-                                      cam.render_raw(s.scene, kMaxDistance, kThermalBackground));
+                                      cam.render_raw(s.scene, kMaxDistance, sky_raw));
     }
 
     // Trajectory every 40 ms, covering every scan and image time.

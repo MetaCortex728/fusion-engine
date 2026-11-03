@@ -45,6 +45,18 @@ if(TARGET fuse_cli)
     target_compile_definitions(fusion_tests PRIVATE FUSE_CLI_PATH="$<TARGET_FILE:fuse_cli>")
     add_dependencies(fusion_tests fuse_cli)
 endif()
+if(TARGET thermal_export)
+    target_sources(fusion_tests PRIVATE test_thermal_export.cpp)
+    target_compile_definitions(fusion_tests PRIVATE
+        THERMAL_EXPORT_PATH="$<TARGET_FILE:thermal_export>")
+    add_dependencies(fusion_tests thermal_export)
+endif()
+if(TARGET fusion_probe)
+    target_sources(fusion_tests PRIVATE test_fusion_probe.cpp)
+    target_compile_definitions(fusion_tests PRIVATE
+        FUSION_PROBE_PATH="$<TARGET_FILE:fusion_probe>")
+    add_dependencies(fusion_tests fusion_probe)
+endif()
 
 target_compile_definitions(fusion_tests PRIVATE
     FUSION_EXPECTED_VERSION="${PROJECT_VERSION}"

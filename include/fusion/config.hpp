@@ -13,12 +13,23 @@
 //     translation: [x, y, z]        # metres
 //   time_offset_ns: 0               # integer nanoseconds
 //
-// Thermal cameras add an optional section (all four constants required):
+// Thermal cameras add an optional section that says how raw values become
+// degrees Celsius. `encoding` is optional and defaults to `planck`, which
+// needs the four Planck constants of PlanckParams (finite, R > 0, B > 0):
 //
 //   thermal:
+//     encoding: planck              # optional, the default
 //     planck: {R: 380747, B: 1428, F: 1, O: -88.539}
 //
-// with the Planck constants of PlanckParams (finite, R > 0, B > 0). A config
+// `linear` is for cameras that deliver temperature directly. It needs the
+// LinearParams (finite, scale != 0) with T = raw * scale + offset, here
+// centi-kelvin:
+//
+//   thermal:
+//     encoding: linear
+//     linear: {scale: 0.01, offset: -273.15}
+//
+// The parameter section of the other encoding must not be present. A config
 // without a `thermal` section, such as an RGB camera's, leaves
 // SensorConfig::thermal empty.
 //
@@ -41,11 +52,6 @@
 
 namespace fusion {
 
-/// Calibration specific to thermal cameras.
-struct ThermalCalibration {
-    PlanckParams planck;
-};
-
 struct SensorConfig {
     std::string name;
     int width = 0;
@@ -56,7 +62,7 @@ struct SensorConfig {
     /// T_sensor_source: maps points from `source_frame` into this sensor's frame.
     Eigen::Isometry3d T_sensor_source = Eigen::Isometry3d::Identity();
     std::int64_t time_offset_ns = 0;
-    /// Present only for thermal cameras.
+    /// Present only for thermal cameras: the raw-to-Celsius conversion.
     std::optional<ThermalCalibration> thermal;
 };
 

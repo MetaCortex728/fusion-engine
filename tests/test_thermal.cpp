@@ -9,7 +9,9 @@
 
 #include <fusion/thermal.hpp>
 
+using fusion::LinearParams;
 using fusion::PlanckParams;
+using fusion::ThermalCalibration;
 using fusion::RawThermalImage;
 using fusion::Rgb8;
 using fusion::WindowLevel;
@@ -185,4 +187,95 @@ TEST_CASE("display image applies conversion, window/level, and colormap per pixe
         fusion::render_display(bad, PlanckParams{380747.0, 1428.0, 1.0, 100.0}, w);
     CHECK(bad_display.at(0, 0) == Rgb8{0, 0, 0});
     CHECK(bad_display.at(1, 0) == Rgb8{255, 255, 255});
+}
+
+TEST_CASE("linear encoding: T = raw * scale + offset, exact for binary-exact parameters") {
+    // 0.0625 and -40 are exact in binary, so every product and sum is exact.
+    const LinearParams p{0.0625, -40.0};
+    CHECK(fusion::raw_to_celsius(0, p) == -40.0);
+    CHECK(fusion::raw_to_celsius(1, p) == -39.9375);
+    CHECK(fusion::raw_to_celsius(1000, p) == 22.5);
+    CHECK(fusion::raw_to_celsius(32768, p) == 2008.0);
+    CHECK(fusion::raw_to_celsius(65535, p) == 4055.9375);
+
+    // A negative scale is allowed.
+    const LinearParams neg{-0.5, 100.0};
+    CHECK(fusion::raw_to_celsius(0, neg) == 100.0);
+    CHECK(fusion::raw_to_celsius(65535, neg) == -32667.5);
+
+    // Offset only shifts; scale 1 passes raw values through.
+    CHECK(fusion::raw_to_celsius(65535, LinearParams{1.0, 0.0}) == 65535.0);
+}
+
+TEST_CASE("linear encoding in centi-kelvin") {
+    const LinearParams ck{0.01, -273.15};
+    // 0 * 0.01 is exactly 0, so raw 0 gives the offset exactly.
+    CHECK(fusion::raw_to_celsius(0, ck) == -273.15);
+    // 0.01 is not exact in binary; the result is within one rounding.
+    CHECK(std::abs(fusion::raw_to_celsius(65535, ck) - 382.2) <= 1e-12);
+    CHECK(std::abs(fusion::raw_to_celsius(27315, ck) - 0.0) <= 1e-12);
+    CHECK(std::abs(fusion::raw_to_celsius(29315, ck) - 20.0) <= 1e-12);
+    CHECK(std::abs(fusion::raw_to_celsius(25315, ck) - -20.0) <= 1e-12);
+    // Same arithmetic as the formula, so equal bit for bit.
+    CHECK(fusion::raw_to_celsius(65535, ck) == 65535.0 * 0.01 - 273.15);
+}
+
+TEST_CASE("linear encoding rejects non-finite parameters and a zero scale") {
+    CHECK_NOTHROW(fusion::validate(LinearParams{0.01, -273.15}));
+    CHECK_THROWS_AS(fusion::validate(LinearParams{0.0, -273.15}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::validate(LinearParams{-0.0, 0.0}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, LinearParams{0.0, 1.0}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, LinearParams{kNaN, 1.0}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, LinearParams{kInf, 1.0}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, LinearParams{-kInf, 1.0}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, LinearParams{0.01, kNaN}), std::invalid_argument);
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, LinearParams{0.01, kInf}), std::invalid_argument);
+    const RawThermalImage image(2, 2);
+    CHECK_THROWS_AS(fusion::render_display(image, ThermalCalibration::from_linear({0.0, 0.0}),
+                                           WindowLevel{30.0, 10.0}),
+                    std::invalid_argument);
+}
+
+TEST_CASE("thermal calibration dispatches on the encoding") {
+    const ThermalCalibration planck = ThermalCalibration::from_planck(kExample);
+    const ThermalCalibration linear = ThermalCalibration::from_linear({0.0625, -40.0});
+    CHECK(planck.encoding == fusion::ThermalEncoding::planck);
+    CHECK(linear.encoding == fusion::ThermalEncoding::linear);
+    for (const std::uint16_t s : {std::uint16_t{1}, std::uint16_t{14000}, std::uint16_t{65535}}) {
+        CHECK(fusion::raw_to_celsius(s, planck) == fusion::raw_to_celsius(s, kExample));
+    }
+    CHECK(fusion::raw_to_celsius(0, linear) == -40.0);
+    CHECK(fusion::raw_to_celsius(65535, linear) == 4055.9375);
+
+    // A default calibration is Planck with zero constants, which is invalid.
+    CHECK_THROWS_AS(fusion::validate(ThermalCalibration{}), std::invalid_argument);
+    // Only the selected encoding's parameters are validated.
+    ThermalCalibration mixed = linear;
+    mixed.planck = PlanckParams{};  // invalid, but unused
+    CHECK_NOTHROW(fusion::validate(mixed));
+    CHECK_THROWS_AS(fusion::raw_to_celsius(100, ThermalCalibration::from_planck({})),
+                    std::invalid_argument);
+}
+
+TEST_CASE("display image with the linear encoding") {
+    // Centi-kelvin: 25315 -> -20 C, 27315 -> 0 C, 29315 -> 20 C, 0 -> -273.15 C,
+    // 65535 -> 382.2 C. Window [-20, 20].
+    const RawThermalImage image(5, 1, {25315, 27315, 29315, 0, 65535});
+    const ThermalCalibration ck = ThermalCalibration::from_linear({0.01, -273.15});
+    const WindowLevel w{0.0, 40.0};
+    const auto display = fusion::render_display(image, ck, w);
+    REQUIRE(display.pixels.size() == 5);
+    CHECK(display.at(0, 0) == Rgb8{0, 0, 0});
+    CHECK(display.at(1, 0) == fusion::hot_colormap(0.5));
+    CHECK(display.at(1, 0) == Rgb8{255, 128, 0});
+    CHECK(display.at(2, 0) == Rgb8{255, 255, 255});
+    CHECK(display.at(3, 0) == Rgb8{0, 0, 0});        // clamps low
+    CHECK(display.at(4, 0) == Rgb8{255, 255, 255});  // clamps high
+    CHECK(image.values() == std::vector<std::uint16_t>{25315, 27315, 29315, 0, 65535});
+
+    // The Planck overload is the Planck calibration.
+    const RawThermalImage counts(3, 1, {7500, 15000, 30000});
+    const WindowLevel w2{180.0, 180.0};
+    CHECK(fusion::render_display(counts, kExample, w2).pixels ==
+          fusion::render_display(counts, ThermalCalibration::from_planck(kExample), w2).pixels);
 }

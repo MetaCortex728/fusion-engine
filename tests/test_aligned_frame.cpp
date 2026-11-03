@@ -185,10 +185,15 @@ TEST_CASE("aligned frame: compensated depth agrees with ray-cast ground truth") 
                 if (!p.projection) {
                     CHECK_FALSE(p.nearest);
                     CHECK_FALSE(p.raw);
+                    CHECK_FALSE(p.celsius);
                     continue;
                 }
                 ++projected;
                 CHECK(p.raw.has_value() == thermal);
+                CHECK(p.celsius.has_value() == thermal);
+                if (thermal && p.raw && p.celsius) {
+                    CHECK(*p.celsius == fusion::raw_to_celsius(*p.raw, *s.thermal.config.thermal));
+                }
                 const auto d = cf->depth->at(p.projection->col, p.projection->row);
                 REQUIRE(d);
                 CHECK(*d <= p.projection->depth);
@@ -389,11 +394,63 @@ TEST_CASE("aligned frame: nearest point wins a shared pixel, first on a tie") {
     fusion::write_aligned_frame_csv(csv, f);
     CHECK(csv.str() ==
           "point,x,y,z,intensity,rgb_u,rgb_v,rgb_depth,rgb_nearest,"
-          "thermal_u,thermal_v,thermal_depth,thermal_raw,thermal_nearest\n"
-          "0,0,0,3,1,1.5,1.5,3,0,,,,,\n"
-          "1,0,0,2,2,1.5,1.5,2,1,,,,,\n"
-          "2,0,0,2,3,1.5,1.5,2,0,,,,,\n"
-          "3,0,0,-1,4,,,,,,,,,\n");
+          "thermal_u,thermal_v,thermal_depth,thermal_raw,thermal_celsius,thermal_nearest\n"
+          "0,0,0,3,1,1.5,1.5,3,0,,,,,,\n"
+          "1,0,0,2,2,1.5,1.5,2,1,,,,,,\n"
+          "2,0,0,2,3,1.5,1.5,2,0,,,,,,\n"
+          "3,0,0,-1,4,,,,,,,,,,\n");
+}
+
+TEST_CASE("aligned frame: thermal samples use the configured linear encoding") {
+    fusion::SensorConfig cfg;
+    cfg.name = "thermal";
+    cfg.width = 4;
+    cfg.height = 4;
+    cfg.K << 1.0, 0.0, 1.5, 0.0, 1.0, 1.5, 0.0, 0.0, 1.0;
+    cfg.source_frame = "lidar";
+    cfg.thermal = fusion::ThermalCalibration::from_linear({0.01, -273.15});
+    // Point 0 lands on pixel (2, 2), point 1 on pixel (0, 0).
+    fusion::LidarScan scan;
+    scan.t_ns = 100;
+    scan.points = {{0, 0, 2}, {-1.5, -1.5, 1}};
+    scan.intensity = {1, 2};
+    fusion::RawThermalImage image(4, 4);
+    image.set(2, 2, 29315);  // 20 degrees C in centi-kelvin
+    image.set(0, 0, 65535);
+    fusion::FrameInputs fi;
+    fi.scan = &scan;
+    fusion::Association a;
+    a.t_ref_ns = 100;
+    a.t_match_ns = 100;
+    a.accepted = true;
+    fi.thermal = fusion::CameraInput{&cfg, a, &image};
+    const fusion::AlignedFrame f = fusion::build_aligned_frame(fi);
+    REQUIRE(f.thermal);
+    REQUIRE(f.thermal->points.size() == 2);
+    CHECK(*f.thermal->points[0].raw == 29315);
+    CHECK(*f.thermal->points[0].celsius == 29315 * 0.01 - 273.15);
+    CHECK(*f.thermal->points[1].raw == 65535);
+    CHECK(*f.thermal->points[1].celsius == 65535 * 0.01 - 273.15);
+    CHECK(std::abs(*f.thermal->points[0].celsius - 20.0) < 1e-12);
+
+    std::ostringstream csv;
+    fusion::write_aligned_frame_csv(csv, f);
+    std::istringstream lines(csv.str());
+    std::string header, row0;
+    std::getline(lines, header);
+    std::getline(lines, row0);
+    CHECK(row0.find(",29315,") != std::string::npos);
+    CHECK(std::stod(row0.substr(row0.find(",29315,") + 7)) == *f.thermal->points[0].celsius);
+
+    // Without a thermal section the raw value is kept and Celsius is empty.
+    cfg.thermal.reset();
+    const fusion::AlignedFrame g = fusion::build_aligned_frame(fi);
+    CHECK(*g.thermal->points[0].raw == 29315);
+    CHECK_FALSE(g.thermal->points[0].celsius);
+
+    // Invalid parameters are rejected.
+    cfg.thermal = fusion::ThermalCalibration::from_linear({0.0, -273.15});
+    CHECK_THROWS_AS(fusion::build_aligned_frame(fi), std::invalid_argument);
 }
 
 TEST_CASE("aligned frame from the on-disk sequence agrees within float32 precision") {

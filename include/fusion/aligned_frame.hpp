@@ -5,7 +5,8 @@
 // every accepted camera the scan is moved to that camera's capture time with
 // scan-level motion compensation (when a trajectory covers both times) and
 // projected into the camera with the z-buffered projection, giving a sparse
-// depth map and, per point, the pixel, depth and, for thermal, the raw count.
+// depth map and, per point, the pixel, depth and, for thermal, the raw count
+// and its temperature in degrees Celsius.
 //
 // The frame owns all of its data. Building one reads its inputs and never
 // modifies them; there is no global state.
@@ -75,6 +76,10 @@ struct PointInCamera {
     bool nearest = false;
     /// Thermal camera only: the raw count at the point's pixel.
     std::optional<std::uint16_t> raw;
+    /// Thermal camera only: that raw value in degrees Celsius, converted with
+    /// the camera config's encoding (Planck or linear). Empty when the config
+    /// has no `thermal` section or the value cannot be converted.
+    std::optional<double> celsius;
 };
 
 /// The result for one camera.
@@ -105,13 +110,14 @@ struct AlignedFrame {
 /// Builds the aligned frame. Throws std::invalid_argument when the scan is
 /// missing, the intensity count differs from the point count, a camera has
 /// no config, a camera's association is for another reference time, or an
-/// accepted thermal camera has no image or one of the wrong size.
+/// accepted thermal camera has no image, one of the wrong size, or invalid
+/// conversion parameters in its config's `thermal` section.
 AlignedFrame build_aligned_frame(const FrameInputs& inputs);
 
 /// Writes the per-point output as CSV with the header
 ///   point,x,y,z,intensity,
 ///   rgb_u,rgb_v,rgb_depth,rgb_nearest,
-///   thermal_u,thermal_v,thermal_depth,thermal_raw,thermal_nearest
+///   thermal_u,thermal_v,thermal_depth,thermal_raw,thermal_celsius,thermal_nearest
 /// (one line) and one row per scan point. A camera's fields are empty when
 /// the camera is absent, its association was rejected, or the point is not
 /// visible in it. Numbers use the shortest text that reads back exactly.

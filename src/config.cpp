@@ -203,15 +203,41 @@ SensorConfig parse(const YAML::Node& root, const Parser& p) {
 
     if (root["thermal"].IsDefined()) {
         const YAML::Node th = p.child(root, "", "thermal");
-        const YAML::Node pl = p.child(th, "thermal", "planck");
-        PlanckParams planck;
-        planck.R = p.number(p.child(pl, "thermal.planck", "R"), "thermal.planck.R");
-        planck.B = p.number(p.child(pl, "thermal.planck", "B"), "thermal.planck.B");
-        planck.F = p.number(p.child(pl, "thermal.planck", "F"), "thermal.planck.F");
-        planck.O = p.number(p.child(pl, "thermal.planck", "O"), "thermal.planck.O");
-        if (!(planck.R > 0.0)) p.fail("thermal.planck.R", "must be positive", &pl);
-        if (!(planck.B > 0.0)) p.fail("thermal.planck.B", "must be positive", &pl);
-        cfg.thermal = ThermalCalibration{planck};
+        if (!th.IsMap()) p.fail("thermal", "expected a map", &th);
+        ThermalCalibration cal;
+        std::string encoding = "planck";
+        if (th["encoding"].IsDefined()) {
+            encoding = p.text(p.child(th, "thermal", "encoding"), "thermal.encoding");
+        }
+        if (encoding == "planck") {
+            if (th["linear"].IsDefined()) {
+                p.fail("thermal.linear", "only allowed with encoding 'linear'", &th);
+            }
+            const YAML::Node pl = p.child(th, "thermal", "planck");
+            cal.encoding = ThermalEncoding::planck;
+            cal.planck.R = p.number(p.child(pl, "thermal.planck", "R"), "thermal.planck.R");
+            cal.planck.B = p.number(p.child(pl, "thermal.planck", "B"), "thermal.planck.B");
+            cal.planck.F = p.number(p.child(pl, "thermal.planck", "F"), "thermal.planck.F");
+            cal.planck.O = p.number(p.child(pl, "thermal.planck", "O"), "thermal.planck.O");
+            if (!(cal.planck.R > 0.0)) p.fail("thermal.planck.R", "must be positive", &pl);
+            if (!(cal.planck.B > 0.0)) p.fail("thermal.planck.B", "must be positive", &pl);
+        } else if (encoding == "linear") {
+            if (th["planck"].IsDefined()) {
+                p.fail("thermal.planck", "only allowed with encoding 'planck'", &th);
+            }
+            const YAML::Node li = p.child(th, "thermal", "linear");
+            cal.encoding = ThermalEncoding::linear;
+            cal.linear.scale =
+                p.number(p.child(li, "thermal.linear", "scale"), "thermal.linear.scale");
+            cal.linear.offset =
+                p.number(p.child(li, "thermal.linear", "offset"), "thermal.linear.offset");
+            if (cal.linear.scale == 0.0) p.fail("thermal.linear.scale", "must not be zero", &li);
+        } else {
+            const YAML::Node en = th["encoding"];
+            p.fail("thermal.encoding",
+                   "unknown encoding '" + encoding + "' (expected 'planck' or 'linear')", &en);
+        }
+        cfg.thermal = cal;
     }
     return cfg;
 }
